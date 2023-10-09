@@ -1,0 +1,25 @@
+# this is the configuration file.
+# an example file "config.py.example" is checked in with the project.
+
+home = (50.964668, 7.413264)
+sungrow_ip = '192.168.1.2'
+sungrow_test_ip = '192.168.1.2' # whoever guesses, why this is there, should set up the system alike!
+
+openDTU_ip = "192.168.1.3"
+
+tesla_login = 'your@tesla.account.com'
+
+# for image-logger
+image_url = 'http://192.168.1.4/'
+
+# tasmota addresses
+tasmota_ips = ('192.168.1.31',
+               '192.168.1.32',
+               '192.168.1.33',
+               '192.168.1.34',
+               '192.168.1.35',
+               '192.168.1.36',
+               '192.168.1.37',
+               '192.168.1.38')
+
+tasmota_meter_ip = '192.168.1.42'
