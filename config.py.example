@@ -23,3 +23,7 @@ tasmota_ips = ('192.168.1.31',
                '192.168.1.38')
 
 tasmota_meter_ip = '192.168.1.42'
+
+# Your Tibber API token
+tibber_api_token = "5K4MVS-OjfWhK_4yrjOlFe1F6kJXPVf7eQYggo8ebAE" # sample token - data will be garbage!
+

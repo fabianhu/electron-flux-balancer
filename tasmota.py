@@ -28,11 +28,12 @@ class Tasmotas:
         self.dat.add_item("TAS 37 Power", source={"ip": tasmota_ips[6], "on_w": 0  }, send_min_diff=5, filter_std_time=10, filter_jump=500)
         self.dat.add_item("TAS 38 Power", source={"ip": tasmota_ips[7], "on_w": 0  }, send_min_diff=5, filter_std_time=10, filter_jump=500)
 
+
         # hardcoded Stromzähler
         self.smldat = database.MeasurementList()
-        self.smldat.add_item("SML purchase", source="purchase", send_min_diff=0.1, filter_jump=10) # fixme maybe too precise for long time!!
-        self.smldat.add_item("SML export", source="export", send_min_diff=0.1, filter_jump=10)
-        self.smldat.add_item("SML power", source="power", send_min_diff=5, filter_jump=10)
+        self.smldat.add_item("SML purchase", source="purchase", send_min_diff=10, filter_jump=1000)
+        self.smldat.add_item("SML export", source="export", send_min_diff=10, filter_jump=1000)
+        self.smldat.add_item("SML power", source="power", send_min_diff=10, filter_jump=1000)
 
 
     def update(self, actPower = None):

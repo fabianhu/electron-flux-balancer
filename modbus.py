@@ -60,7 +60,7 @@ def _unpack_bytes_to_ints(data):
 class Bus:
     def __init__(self, device):
         self.device = device
-        if debug: logger.info("init bus")
+        if debug: logger.info(f"init bus {device}")
 
     def send_request(self, hex_string):
         if debug: logger.info(">" + hex_string)
@@ -75,7 +75,7 @@ class Bus:
             response = ser.read(1000)  # Read the response from the Modbus RTU device
             ser.close()  # Close the serial connection
         except:
-            if debug: logger.log("Serial Port error")
+            logger.log("Modbus RTU - Serial Port init error")
             return ""
 
         shortponse = response[:-2]

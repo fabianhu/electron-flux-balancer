@@ -1,0 +1,206 @@
+1. VCC, GND: DC7-24V power input
+
+2.IN, GND__IN: DC3.3-30V optocoupler signal input
+
+3. A+, B-: RS485 communication interface, A+, B- are respectively connected to A+, B- of the external control terminal
+
+4. Relay switch signal output
+
+NC: Normally closed, the relay is short-connected with COM before it is closed, and it is suspended after it is closed;
+
+COM: public end;
+
+NO: Normally open end, the relay is suspended before the pull-in, and short-circuited with COM after the pull-in.
+
+5.Relay indicator light: lights up when the relay is closed
+
+6 GND, RXD, TXD: TTL level UART communication interface, GND, RXD, TXD respectively
+
+Connect to the GND, TXD, RXD of the external control terminal, support the connection of 3.3V/5V external TTL serial port
+
+7. RS485 and TTL serial port selection. When using RS485 communication, DI connects to TXD and RO connects to RXD; when using TTL communication, both DI and RO connect to NC.
+
+
+Introduction to Modbus RTU instruction
+
+Modbus devices perform related operations by receiving Modbus RTU instructions from an external control terminal (such as host computer/MCU). Frame instructions are generally composed of device address, function code, register address, register data, and check code. Frame length It is related to the function code. -Generally, the first byte of each frame of data is the device address, the range of which can be set is 1-255, the default is 255 (ie 0xFF), and the last 2 bytes are the CRC check code.
+
+
+Assuming the device address is 255, the commonly used Modbus RTU commands are as follows:
+
+1. Turn on the No. 1 relay (manual mode)
+
+Send: FF 05 00 00 FF 00 99 E4
+
+Return as it is: FF 05 00 00 FF 00 99 E4
+
+Remarks: (1) The 3-4 bytes of the sending frame represent the relay address. The addresses of relay 1-relay 8 are 0x0000, 0x0001,0x0002, 0x0003, 0x0004, 0x0005, 0x0006, 0x0007
+
+(2) The 5-6 bytes of the sending frame represent data, 0xFF00 means opening the relay, and 0x0000 means closing the relay.
+
+
+2. Turn off the No. 1 relay (manual mode)
+
+Send: FF 05 00 00 00 00 D8 14
+
+Return as it is: FF 05 00 00 00 00 D8 14
+
+
+3. Turn on all relays
+
+Send: FF 0F 00 00 00 08 01 FF 30 1D
+
+Return: FF 0F 00 00 00 08 41 D3
+
+
+4. Turn off all relays
+
+Send: FF OF 00 00 00 08 01 00 70 5D
+
+Returns: FF OF 00 00 00 08 41 D3
+
+
+5. Set the device address to 1
+
+Send: 00 10 00 00 00 01 02 00 01 6A 00.
+
+Return as it is: 00 10 00 00 00 01 02 00 01 6A 00
+
+Remarks: The 9th byte 0x01 of the sending frame is the written device address
+
+
+6. Set the device address to 255
+
+Send: 00 10 00 00 00 01 02 00 FF EB 80
+
+Return as it is: 00 10 00 00 00 01 02 00 FF EB 80
+
+Remarks: The 9th byte of the sending frame, 0xFF, is the written device address
+
+
+7. Read the device address
+
+Send: 00 03 00 00 00 01 85 DB
+
+Return: 00 03 02 00 FF C5 C4
+
+Remarks: The 5th byte of the return frame, 0xFF, is the read device address
+
+
+8. Read the relay status
+
+Send: FF 01 00 00 00 08 28 12
+
+Returns: FF 01 01 01 A1 AO
+
+Remarks: Bit0--Bit7 of the 4th byte of the return frame, 0x01, represent relay 1--relay 8, 0 means off, and 1 means on.
+
+
+9. Read optocoupler input status
+
+Send: FF 02 00 00 00 08 6C 12
+
+Returns: FF 02 01 01 51 AO
+
+Remarks: IN1--IN8 of the 4th byte of the return frame 0x01 represent the input signal of optocoupler 1 to optocoupler 8, 0 represents low level, and 1 represents high level
+
+
+10. Set the baud rate to 4800
+
+Send: FF 10 03 E9 00 01 02 00 02 4A 0C
+
+Return: FF 10 03 E9 00 01 C5 A7
+
+Remarks: The 9th byte of the sent frame is the baud rate setting value, 0x02, 0x03, and x04 represent 4800, 9600, 19200 respectively
+
+
+11.Set the baud rate to 9600
+
+Send: FF 10 03 E9 00 01 02 00 03 8B CC
+
+Returns: FF 10 03 E9 00 01 C5 A7
+
+
+12. Set the baud rate to 19200
+
+Send: FF 10 03 E9 00 01 02 00 04 CA 0E
+
+Return: FF 10 03 E9 00 01 C5 A7
+
+
+13, read the baud rate
+
+Send: FF 03 03 E8 00 01 11 A4
+
+Returns: FF 03 02 00 04 90 53
+
+Remarks: The 5th byte of the return frame represents the baud rate read, 0x02, 0x03, and x04 represent 4800, 9600, 19200 respectively
+
+
+14. Turn on the No. 1 relay (flash close mode 2S)
+
+Send: FF 10 00 03 00 02 04 00 04 00 14 C5 9F
+
+Return: FF 10 00 03 00 02 A4 16
+
+Remarks: (1) The 3-4 bytes of the sending frame represent the relay address, the addresses of relay 1-relay 8 are 0x0003, 0x0008, 0x000D, 0x0012, 0x0017, 0x001C, 0x0021, 0x0026
+
+(2) The 0-11 bytes of the sent frame represent the delay setting value, the delay base is 0.1S, so the delay time is 0x0014*0.1=20*0.1S=2S, and the relay will be turned off automatically after opening 2S
+
+
+15, turn off the No. 1 relay (flash mode 3S)
+
+Send: FF 10 00 03 00 02 04 00 02 00 1E A5 99
+
+Return: FF 10 00 03 00 02 A4 16
+
+Remarks: (1) The 3-4 bytes of the sending frame represent the relay address. The addresses of relay 1-relay 8 are 0x0003, 0x0008, 0x000D, 0x0012, 0x0017, 0x001C, 0x0021, 0x0026
+
+(2) The 10th-11th byte of the sending frame represents the delay setting value, the delay base is 0.1S, so the delay time is 0x001E*0.1=30*0.1S=3S, and the relay is turned off automatically after 3S.
+
+
+Simple instructions
+
+The Modbus relay module can receive Modbus RTU commands from the host computer/MCU via the RS485/TTL UART interface to perform related operations. The following is to use the host computer software to open the relay 1 through the RS485 interface
+
+(Manual mode) As an example, assuming the device address is 255 and the baud rate is 9600, the steps are as follows:
+
+1, VCC, GND are respectively connected to the positive and negative poles of the power supply;
+
+2. A+ and B-respectively USB to A+ and B- of the output of the RS485 module;
+
+3. Open the host computer software "ModbusRTU configuration tool", select the correct port number, select 9600 for the baud rate, set the address to 255, and click "open serial port";
+
+4. Click "JD1 to open" again to turn on relay 1, and at the same time, the indicator light of relay 1 is on. As shown below:
+
+
+
+
+How to generate verification code
+
+When the Modbus RTU command is sent through the ready-made host computer software (such as: ModbusRTU configuration tool), the CRC check code is automatically generated. If you want to use the serial port debugging software (such as SSCOM) to test the Modbus relay module, you need to generate it manually The CRC check code is placed at the end of the sending frame, such as turning on the first relay (manual mode):
+
+
+1. The composition of the sending frame for opening/closing the relay (manual mode) is:
+
+Device address (1Byte) + function code (1Byte) + register address (2Byte) + register data (
+
+2Byte) +CRC check code (2Byte)
+
+2. Assuming that the device address is 0xFF, the first 6 bytes of the sending frame are:
+
+FF 05 00 00 FF 00
+
+3. Use the CRC check tool to find the check code for these 6 bytes: http://www.ip33.com/crc.html  ->> E499
+
+4. After exchanging the high and low byte positions of the check calculation result E499, the CRC check code 99E4 is obtained, and the complete transmission frame: FF 05 00 00 FF 00 99 E4
+
+
+5. Send the sending frame to the Modbus relay module through the serial port debugging software SSCOM V5.13.1 to open the first relay (manual mode), as follows:
+
+
+
+
+
+
+

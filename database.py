@@ -98,7 +98,30 @@ class MeasurementList:
         r=[]
         for i in self.__data:
             difTime = time.time() - self.__data[i]['send_last_time']
+            # fixme missing timestamp transfer
+            '''
+            import time
+            from datetime import datetime
+                        # Get the current time in seconds since the epoch (UTC)
+            epoch_time = time.time()
+            
+            # Convert to a datetime object (also in UTC)
+            current_time = datetime.utcfromtimestamp(epoch_time)
+            
+            # Convert to an ISO 8601 formatted string
+            iso_time = current_time.isoformat() + "Z"
+            
+            # Create a new data point for InfluxDB
+            data_point = {
+                "measurement": "your_measurement",
+                "time": iso_time,
+                "fields": {
+                    "your_field": "your_value"
+                }
+            }
 
+            
+            '''
             #decide, if the value can be filtered
             if (type(self.__data[i]['value']) == float or type(self.__data[i]['value']) == int) and self.__data[i]['send_last_value']  is not None:
                 # check, if __data has changed enough
