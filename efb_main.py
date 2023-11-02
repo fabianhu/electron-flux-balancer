@@ -101,6 +101,8 @@ class ElectronFluxBalancer:
         self.EMERGENCY_HEATER_OFF = False
 
         self.sg = sungrow.SungrowSH(sungrow_ip, 502)
+
+
         RS485_bus = modbus.Bus("/dev/ttyUSB0")
         self.temperatures_heating = modbus.Nt18b07TemperatureIn(RS485_bus, 1)
         self.rel1 = modbus.Bestep2Relays(RS485_bus, 0xff)
@@ -125,9 +127,11 @@ class ElectronFluxBalancer:
         taskctl.add_task("tesla", self.do_car_update, 5*60,30)
         taskctl.add_task("tesla_charge", self.do_car_charge, 30, 10)
         taskctl.add_task("sungrow", self.do_sungrow_update, 2, 8)
-        # taskctl.add_task("temperature", self.do_temperature_update, 3, 10)
         taskctl.add_task("tasmota", self.do_tasmota_stuff,10,10)
-        taskctl.add_task("heater", self. do_heater_update, 10,5)
+
+        # do them inside the main task, because of modbus being picky.
+        # taskctl.add_task("temperature", self.do_temperature_update, 3, 10)
+        # taskctl.add_task("heater", self. do_heater_update, 10,5)
 
 
     def set_heater(self, watt):
@@ -359,4 +363,5 @@ if __name__ == '__main__':
     efb = ElectronFluxBalancer()
     while True:
         efb.do_temperature_update()
+        efb.do_heater_update()
         time.sleep(2)

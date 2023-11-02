@@ -4,6 +4,7 @@ from datetime import datetime
 from logger import logger
 import traceback
 
+# fixme think about multiprocessing
 
 class TaskController:
     def __init__(self):
@@ -12,7 +13,7 @@ class TaskController:
 
     def add_task(self, name, func, interval, watchdog_timeout):
         t = threading.Thread(target=self._run_task, args=(name,))
-        self.tasks[name] = {'func': func, 'interval': interval, 'watchdog_timeout': watchdog_timeout, 'thread': t}
+        self.tasks[name] = {'func': func, 'interval': interval, 'watchdog_timeout': watchdog_timeout, 'thread': t, 'runtime': 0.0}
         t.start()
 
     def is_task_running(self, name):
@@ -29,7 +30,7 @@ class TaskController:
             watchdog = threading.Timer(watchdog_timeout, self._restart_task, args=(name,))
             watchdog.start()
 
-            start_time = datetime.now()
+            start_time = time.time()
 
             if not callable(func):
                 logger.log("Task not callable: ", func, self.tasks[name])
@@ -42,11 +43,13 @@ class TaskController:
                     logger.log(f"Exception occurred in task {name} in file {filename} at line {line}: Exception : {e}")
 
 
-                end_time = datetime.now()
+                end_time = time.time()
 
-                #logger.info(f"Task {name} started at {start_time} and finished at {end_time}")
+                #logger.info(f"Task {name} took {end_time - start_time} s")
 
             watchdog.cancel()
+
+            self.tasks[name]['runtime'] = end_time - start_time
 
             time_to_next_run = next_run - time.time()
             if time_to_next_run > 0:
@@ -58,6 +61,8 @@ class TaskController:
             task_data = self.tasks[name]
             if self.is_task_running(name): # check if task is still running
                 logger.log(f"Task {name} is still running and the timout of {self.tasks[name]['watchdog_timeout']}s is over")
+                # fixme we did not kill it!
+                raise Exception(f"Task {name} is hanging")
             else:
                 logger.log(f"Task {name} died on the way - restarting")
                 t = threading.Thread(target=self._run_task, args=(name,))
