@@ -1,0 +1,17 @@
+/teslapy/__pycache__/*
+/cache.json
+/__pycache__/*
+/Tesla Testdumps/*
+/config.py
+/parameters.json
+/ESP32_display/.pio/
+/ESP32_display/.vscode
+/lib/tesla/TeslaKeys/privatekey.pem
+/lib/tesla/TeslaKeys/publickey.pem
+/tesla_tokens.json
+/tesla-control/tesla-control
+/lib/tesla/.temp_token
+/lib/tesla/tesla-control/tesla-control
+/*.log
+*__pycache__*
+*.temp_token

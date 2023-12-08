@@ -2,8 +2,9 @@ from datetime import datetime
 
 import pytz
 
-import database
-from logger import logger
+from lib.measurementlist import MeasurementList
+from lib.logger import Logger
+logger = Logger()
 import requests
 import time
 import imagelogger
@@ -17,7 +18,7 @@ class Tasmotas:
 
         self.iterator = 0
 
-        self.dat = database.MeasurementList()
+        self.dat = MeasurementList()
         # source: ip, on_w,
         self.dat.add_item("TAS 31 Power", source={"ip": tasmota_ips[0], "on_w": 100}, send_min_diff=5, filter_std_time=10, filter_jump=500)
         self.dat.add_item("TAS 32 Power", source={"ip": tasmota_ips[1], "on_w": 0  }, send_min_diff=5, filter_std_time=10, filter_jump=500)
@@ -30,7 +31,7 @@ class Tasmotas:
 
 
         # hardcoded Stromzähler
-        self.smldat = database.MeasurementList()
+        self.smldat = MeasurementList()
         self.smldat.add_item("SML purchase", source="purchase", send_min_diff=10, filter_jump=1000)
         self.smldat.add_item("SML export", source="export", send_min_diff=10, filter_jump=1000)
         self.smldat.add_item("SML power", source="power", send_min_diff=10, filter_jump=1000)

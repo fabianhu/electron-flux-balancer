@@ -2,26 +2,32 @@
 # works with SH10RT
 
 from pymodbus.client import ModbusTcpClient
-import database
-from logger import logger
-import struct
+from lib.measurementlist import MeasurementList
+from lib.logger import Logger
+logger = Logger()
+
+def checked_multiply(a,b):
+    if a is not None and b is not None:
+        return a*b
+    else:
+        return None
 
 
 class SungrowSH:
     def __init__(self, ip, port):
         self.call_counter = 0
-        logger.log("Start SungrowSH", ip)
+        logger.info(f"Start SungrowSH, {ip}")
 
-        self.measurements = database.MeasurementList()
+        self.measurements = MeasurementList()
         self.client = ModbusTcpClient(ip, port, timeout=2, retries=1)
 
         r = self.client.read_input_registers(address=4949, count=2 + 2 + 15 + 15, slave=1)  # 4968
         ver = ''.join(f' {reg:04x}' for reg in r.registers[0:4])
         sw_ARM = extract_string_from_data(r.registers, 4, 15)
         sw_DSP = extract_string_from_data(r.registers, 4 + 15, 15)
-        logger.log("Sungrow", ver, sw_ARM, sw_DSP)
-        logger.info("Sungrow", ver, sw_ARM, sw_DSP)
-        print("Sungrow", ver, sw_ARM, sw_DSP)
+
+        logger.info(f"SungrowSH, {ver}, {sw_ARM}, {sw_DSP}")
+
 
         self.measurements.add_item(name='ELE Nominal Output Power', unit="W", send_min_diff=10.0, filter_time=30, filter_jump=2000, source={'address': 5000, 'data_type': 'uint16be', 'factor': 0.1})
         self.measurements.add_item(name='ELE Inside Temperature', unit='°C', send_min_diff=0.5, filter_time=30, filter_jump=5, source={'address': 5007, 'data_type': 'int16be', 'factor': 0.1})
@@ -89,7 +95,7 @@ class SungrowSH:
                     decoded = (data[index + 1] << 16) | (data[index] & 0xFFFF)
 
                 if decoded is None:
-                    logger.log("Decoding error", data_type, i)
+                    logger.log(f"Sungrow decoding error, {data_type}, {i}")
                 else:
                     scaled = decoded * self.measurements.get_source(i)['factor']
                     self.measurements.update_value(i, scaled)
@@ -115,13 +121,14 @@ class SungrowSH:
         except Exception as e:
             logger.log(f'Modbus TCP error: {type(e)}: {e}')
 
+
         finally:
             # Close the connection in any case - done also at a return!
             self.client.close()
 
         # calculated values:
-        self.measurements.update_value('ELE String S power', self.measurements.get_value('ELE MPPT 1 Voltage') * self.measurements.get_value('ELE MPPT 1 Current'))
-        self.measurements.update_value('ELE String N power', self.measurements.get_value('ELE MPPT 2 Voltage') * self.measurements.get_value('ELE MPPT 2 Current'))
+        self.measurements.update_value('ELE String S power', checked_multiply(self.measurements.get_value('ELE MPPT 1 Voltage') , self.measurements.get_value('ELE MPPT 1 Current')))
+        self.measurements.update_value('ELE String N power', checked_multiply(self.measurements.get_value('ELE MPPT 2 Voltage') , self.measurements.get_value('ELE MPPT 2 Current')))
         tdc = self.measurements.get_value('ELE Total DC Power')
         tap = self.measurements.get_value('ELE Total active power')
         if tdc is not None and tap is not None:
@@ -129,6 +136,8 @@ class SungrowSH:
 
         if not _test: self.measurements.write_measurements()
 
+
+    enable_log = False # log all (expected) modbus errors
 
     def read_and_process_registers(self, start, count):
         # yes, a lot of hardcoded numbers in here.
@@ -141,33 +150,33 @@ class SungrowSH:
 
             if start == 4999:
                 if registers[0] != 0x0E0F:
-                    logger.log("Modbus-TCP: Not the correct ID")
+                    if self.enable_log: logger.log("Modbus-TCP: Not the correct ID")
                     hex_string = ''.join(f'{reg:04x} ' for reg in registers)
-                    logger.log(f"malformed data {start} (hex): {hex_string}")
+                    if self.enable_log: logger.log(f"Modbus-TCP: malformed data {start} (hex): {hex_string}")
                     return
                 if registers[5000-start] != 100:
-                    logger.log("Modbus-TCP: Nominal output power is not as expected")
+                    if self.enable_log: logger.log("Modbus-TCP: Nominal output power is not as expected")
                     hex_string = ''.join(f'{reg:04x} ' for reg in registers)
-                    logger.log(f"malformed data {start} (hex): {hex_string}")
+                    if self.enable_log: logger.log(f"Modbus-TCP: malformed data {start} (hex): {hex_string}")
                     return
                 if registers[5007-start] == 0:
-                    logger.log("Modbus-TCP: internal temperature is Zero")
+                    if self.enable_log: logger.log("Modbus-TCP: internal temperature is Zero")
                     hex_string = ''.join(f'{reg:04x} ' for reg in registers)
-                    logger.log(f"malformed data {start} (hex): {hex_string}")
+                    if self.enable_log: logger.log(f"Modbus-TCP: malformed data {start} (hex): {hex_string}")
                     return
 
                 self.decode_array(registers, start)
 
             elif start == 13007:
                 if registers[13038 - start] != 960:
-                    logger.log("Modbus-TCP: Received not my battery capacity")
+                    if self.enable_log: logger.log("Modbus-TCP: Received not my battery capacity")
                     hex_string = ''.join(f'{reg:04x} ' for reg in registers)
-                    logger.log(f"malformed data {start + count - 1} (hex): {hex_string}")
+                    if self.enable_log: logger.log(f"Modbus-TCP: malformed data {start + count - 1} (hex): {hex_string}")
                     return
                 if 950 > registers[13023 - start] > 1000:
-                    logger.log("Modbus-TCP: Battery SOH not as expected.")
+                    if self.enable_log: logger.log("Modbus-TCP: Battery SOH not as expected.")
                     hex_string = ''.join(f'{reg:04x} ' for reg in registers)
-                    logger.log(f"malformed data {start + count - 1} (hex): {hex_string}")
+                    if self.enable_log: logger.log(f"Modbus-TCP: malformed data {start + count - 1} (hex): {hex_string}")
                     return
 
                 self.decode_array(registers, start)
@@ -176,37 +185,66 @@ class SungrowSH:
 
 
     def set_forced_charge(self, _power):
-        # command the battery to do stuff. 0 is back to work.
+        # command the battery to do stuff. None is back to work.
+        """
+        13049: EMS mode selection
+            0: Self-consumption mode (Default);
+            2: Forced mode(charge/discharge/stop);
+            3: External EMS mode
+        13050: Charge/discharge command
+            0xAA: Charge;
+            0xBB:Discharge;
+            0xCC: Stop ( Default );
+        13051: Charge/discharge power [W] 0-5000
+         """
+
         try:
             self.client.connect()
         except Exception as e:
             logger.log(f'Modbus TCP connect {type(e)}: {e}')
             return
         else:
-            # write power command
+            # write power command - but only if it has changed!
             try:
-                if 5000 >= _power > 0:
+                r = self.client.read_holding_registers(13049, 3, 1)
+                if not hasattr(r, 'registers'):
+                    logger.log("Modbus read error on set charge")
+                    return
+
+                read_registers = r.registers
+                if _power is None:
+                    # normal op at None values
+                    logger.info("Battery set to normal operation")
+                    set_registers = [0, 0xCC, 0]
+                elif _power == 0:
+                    # stop
+                    logger.info(f"Battery set to stop operation")
+                    set_registers = [2, 0xCC, 0]
+                elif 5000 >= _power > 0:
                     # charge
-                    self.client.write_register(13049, 2, 1)
-                    self.client.write_register(13050, 0xAA, 1)
-                    self.client.write_register(13051, abs(_power), 1)
+                    logger.info(f"Battery set to charge operation with {_power} W")
+                    set_registers = [2, 0xAA, abs(_power)]
                 elif -5000 <= _power < 0:
                     # discharge
-                    self.client.write_register(13049, 2, 1)
-                    self.client.write_register(13050, 0xBB, 1)
-                    self.client.write_register(13051, abs(_power), 1)
+                    logger.info(f"Battery set to discharge operation with {_power} W")
+                    set_registers = [2, 0xBB, abs(_power)]
                 else:
-                    # normal op at 0 and invalid values
-                    self.client.write_register(13049, 0, 1)
-                    self.client.write_register(13050, 0xCC, 1)
-                    self.client.write_register(13051, 0, 1)
+                    logger.log(f"Battery power request out of range with {_power} W!")
+                    # normal op at abnormal values
+                    logger.info("Battery set to normal operation on error")
+                    set_registers = [0, 0xCC, 0]
+
+                for i in range(3):
+                    if set_registers[i] != read_registers[i]:
+                        self.client.write_register(13049+i, set_registers[i] , 1)
+
             except Exception as e:
                 logger.log(f'Modbus write error {type(e)}: {e}')
                 return
 
 
     def set_soc_reserve(self,prc):
-        # set the minimum charge during grid operation
+        # set the minimum state of charge during grid operation
         if prc < 5:
             prc = 5
             logger.log(f'Set discharge min SOC to 5 %, not {prc} %, which is lower than allowed!')
@@ -218,13 +256,19 @@ class SungrowSH:
             logger.log(f'Modbus TCP connect {type(e)}: {e}')
             return
         else:
-            # write power command
-            try:
-                self.client.write_register(13099, prc, 1)
-                logger.info(f'Discharge min SOC set to {prc} %')
-            except Exception as e:
-                logger.log(f'Modbus write error {type(e)}: {e}')
+            r = self.client.read_holding_registers(13099, 1, 1)
+            if not hasattr(r, 'registers'):
+                logger.log("Modbus read error on set soc reserve")
                 return
+            soc = r.registers[0]
+            if soc != prc:
+                # write power command
+                try:
+                    self.client.write_register(13099, prc, 1)
+                    logger.info(f'Battery discharge min SOC set to {prc} %')
+                except Exception as e:
+                    logger.log(f'Modbus write error {type(e)}: {e}')
+                    return
 
 
 def extract_string_from_data(data, position, length):
@@ -250,12 +294,18 @@ if __name__ == '__main__':
     from config import sungrow_test_ip
 
     sg = SungrowSH(sungrow_test_ip, 502)
-    sg.update(_test=True)
-    sg.update(_test=True) # call twice to process all data!
+    #sg.update(_test=True)
+    #sg.update(_test=True) # call twice to process all data!
 
-    #sg.set_forced_charge(0)
-    #sg.set_soc_reserve(10)
+    #sg.set_forced_charge(None)
+    #sg.set_soc_reserve(25)
 
+    '''r= sg.client.read_holding_registers(13049,3,1)
+    registers = r.registers
+    hex_string = ''.join(f' {reg:04x} ' for reg in registers)
+    dec_string = ''.join(f'{reg:05} ' for reg in registers)
+    print(f"Data value (hex): {hex_string}")
+    print(f"Data value (dec): {dec_string}")'''
 
     '''
 

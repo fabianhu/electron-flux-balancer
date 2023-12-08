@@ -2,7 +2,9 @@ import cv2
 import requests
 import numpy as np
 import datetime
-from logger import logger
+from lib.logger import Logger
+logger = Logger()
+
 from config import image_url
 
 # record images of solar panels and write the power text on it.
@@ -14,13 +16,13 @@ def get_image(left,right, debug = False):
     try:
         response = requests.get(image_url, timeout=0.5)
     except requests.exceptions.ConnectionError as e:
-        logger.log("Image ConnectionError", e)
+        logger.log(f"Image ConnectionError, {e}")
         return
     except requests.exceptions.Timeout:
         logger.log("Image request timed out")
         return
     except requests.exceptions.RequestException as e:
-        logger.log("Image An error occurred:", e)
+        logger.log(f"Image An error occurred:, {e}")
         return
 
     if response.status_code == 200:

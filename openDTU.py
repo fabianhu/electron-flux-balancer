@@ -2,8 +2,9 @@
 # polling the info
 
 import requests
-import database
-from logger import logger
+from lib.measurementlist import MeasurementList
+from lib.logger import Logger
+logger = Logger()
 
 def access_nested_dict(data, keys):
     try:
@@ -18,7 +19,7 @@ def access_nested_dict(data, keys):
 class OpenDTU:
     def __init__(self, _ip_address):
         self.ip_address = _ip_address
-        self.dat = database.MeasurementList()
+        self.dat = MeasurementList()
         self.dat.add_item(name="HOY Garage N Power",unit="W",send_min_diff=2, filter_time=60,filter_jump=1000,source=("112183227643","AC","0","Power","v"),filter_std_time=0)
         self.dat.add_item(name="HOY Garage N Temp", unit="°C", send_min_diff=0.5, filter_time=60, filter_jump=1000, source=("112183227643", "INV","0","Temperature","v"), filter_std_time=0)
         self.dat.add_item(name="HOY Garage N Volt", unit="V", send_min_diff=0.5, filter_time=60, filter_jump=1000, source=("112183227643", "DC", "0", "Voltage", "v"), filter_std_time=0)
@@ -33,7 +34,7 @@ class OpenDTU:
         url = f"http://{self.ip_address}/api/livedata/status"
         try:
             # Send a GET request to the URL
-            response = requests.get(url)
+            response = requests.get(url, timeout= 5)
 
             # Check if the request was successful (status code 200)
             if response.status_code == 200:

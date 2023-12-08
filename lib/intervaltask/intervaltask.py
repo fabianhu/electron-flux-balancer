@@ -1,7 +1,9 @@
 import threading
 import time
 from datetime import datetime
-from logger import logger
+from ..logger import Logger
+logger = Logger()
+
 import traceback
 
 # fixme think about multiprocessing
@@ -33,7 +35,7 @@ class TaskController:
             start_time = time.time()
 
             if not callable(func):
-                logger.log("Task not callable: ", func, self.tasks[name])
+                logger.log(f"Task not callable: , {func}, {self.tasks[name]}") # fixme check, how to recover
             else:
                 try:
                     func()
@@ -44,12 +46,10 @@ class TaskController:
 
 
                 end_time = time.time()
-
+                self.tasks[name]['runtime'] = end_time - start_time
                 #logger.info(f"Task {name} took {end_time - start_time} s")
 
             watchdog.cancel()
-
-            self.tasks[name]['runtime'] = end_time - start_time
 
             time_to_next_run = next_run - time.time()
             if time_to_next_run > 0:

@@ -1,21 +1,23 @@
-import teslapy
-import database
+"""
+This is using the NEW 2024 Tesla API.
+"""
+import logging
+
+import config
+from lib.measurementlist import MeasurementList
 import datetime
 import json
 import math
 import time
-from logger import logger
+from lib.logger import Logger
+logger = Logger(logging.INFO, "tesla.log")
 
 from config import home
-from config import tesla_login
 
-import requests.exceptions
-
-# install
-# pip install requests_oauthlib
-# pip install websocket
+from lib.tesla import tesla_api_2024
 
 logToFile = False
+APIVERSION = 69
 
 
 # extract the value from a multi index
@@ -48,253 +50,180 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     return earth_radius * c
 
 
-class Car:
-    def __init__(self, _tesla_login):
-        self.login = _tesla_login
-
-        self.last_seen_s = None  # check, how precise we know the state (age)
+class TeslaCar:
+    def __init__(self, _vin, _api: tesla_api_2024.TeslaAPI):
+        self.vin = _vin
+        self.tesla_api = _api
 
         ### stuff to remember from last input for "is_ready"
-        self.last_distance = 0
-        self.last_distance_time = 0
-        self.is_ready_to_charge = False
-        self.current_request = 0
-        self.current_actual = 0
-        self.is_charging = False
-        self.charge_actual_W = 0.0
-        self.charger_allowed_max_W = 0.0
+        self.last_distance = 0 # ok
+        self.current_request = 0 # ok
+        self.current_actual = 0 # ok
+        self.is_charging = False # ok
 
-        self.cardata = database.MeasurementList()
-
-        _myCar = self.get_car_data()
-        if _myCar is None:
-            logger.log("Tesla connect failed")
-            return
-
-        logger.log(f"Tesla: {_myCar['display_name']} last seen {_myCar.last_seen()} at {str(_myCar['charge_state']['battery_level'])} % SoC with API {_myCar['api_version']}")
-        logger.info(f"Tesla: {_myCar['display_name']} last seen {_myCar.last_seen()} at {str(_myCar['charge_state']['battery_level'])} % SoC with API {_myCar['api_version']}")
-        print(f"Tesla: {_myCar['display_name']} last seen {_myCar.last_seen()} at {str(_myCar['charge_state']['battery_level'])} % SoC with API {_myCar['api_version']}")
-
-        if logToFile:
-            file_name = f"{_myCar['display_name']}_{datetime.datetime.now().isoformat()[:-7].replace(':', '-').replace('T', '_')}.txt"
-
-            with open(file_name, "w") as file:
-                json.dump(_myCar, file, indent=4)
+        self.car_db_data = MeasurementList()
+        self.car_data_cache = None
 
         # configure database channels
-        self.cardata.add_item(name="CAR_state", unit="", filter_jump=1, send_min_diff=1)  # refresh manually, because there would be no source array!
-        self.cardata.add_item(name="CAR_battery_level", source=('charge_state', 'battery_level'), unit="%", filter_jump=3, send_min_diff=1)
-        self.cardata.add_item(name="CAR_usable_battery_level", source=('charge_state', 'usable_battery_level'), unit="%", filter_jump=3, send_min_diff=1)
-        self.cardata.add_item(name="CAR_charge_amps", source=('charge_state', 'charge_amps'), unit="A", filter_jump=1, send_min_diff=1)
-        self.cardata.add_item(name="CAR_charger_actual_current", source=('charge_state', 'charger_actual_current'), unit="A", filter_jump=1, send_min_diff=1)
-        self.cardata.add_item(name="CAR_charge_current_request", source=('charge_state', 'charge_current_request'), unit="A", filter_jump=1, send_min_diff=1)
-        self.cardata.add_item(name="CAR_charge_limit_soc", source=('charge_state', 'charge_limit_soc'), unit="%", filter_jump=1, send_min_diff=1)
-        self.cardata.add_item(name="CAR_charger_phases", source=('charge_state', 'charger_phases'), unit="n", filter_jump=1, send_min_diff=1)
-        self.cardata.add_item(name="CAR_charger_power", source=('charge_state', 'charger_power'), unit="W", filter_jump=100, send_min_diff=100)
-        self.cardata.add_item(name="CAR_charger_voltage", source=('charge_state', 'charger_voltage'), unit="V", filter_jump=5, send_min_diff=1)
-        self.cardata.add_item(name="CAR_charging_state", source=('charge_state', 'charging_state'), unit="")  # can be 'Disconnected', 'Charging', 'Stopped', 'Complete', 'Starting'
-        self.cardata.add_item(name="CAR_minutes_to_full_charge", source=('charge_state', 'minutes_to_full_charge'), unit="min")
-        self.cardata.add_item(name="CAR_time_to_full_charge", source=('charge_state', 'time_to_full_charge'), unit="h")  # h
-        self.cardata.add_item(name="CAR_inside_temp", source=('climate_state', 'inside_temp'), unit="°C", filter_jump=1, send_min_diff=0.5)
-        self.cardata.add_item(name="CAR_outside_temp", source=('climate_state', 'outside_temp'), unit="°C")
-        self.cardata.add_item(name="CAR_latitude", source=('drive_state', 'latitude'), unit="°")
-        self.cardata.add_item(name="CAR_longitude", source=('drive_state', 'longitude'), unit="°")
+        self.car_db_data.add_item(name="CAR_state", unit="", filter_jump=1, send_min_diff=1)  # manually, because there is no source array in sleep!
+        self.car_db_data.add_item(name="CAR_battery_level", source=('charge_state', 'battery_level'), unit="%", filter_jump=3, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_usable_battery_level", source=('charge_state', 'usable_battery_level'), unit="%", filter_jump=3, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_charge_amps", source=('charge_state', 'charge_amps'), unit="A", filter_jump=1, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_charger_actual_current", source=('charge_state', 'charger_actual_current'), unit="A", filter_jump=1, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_charge_current_request", source=('charge_state', 'charge_current_request'), unit="A", filter_jump=1, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_charge_limit_soc", source=('charge_state', 'charge_limit_soc'), unit="%", filter_jump=1, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_charger_phases", source=('charge_state', 'charger_phases'), unit="n", filter_jump=1, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_charger_power", source=('charge_state', 'charger_power'), unit="W", filter_jump=100, send_min_diff=100)
+        self.car_db_data.add_item(name="CAR_charger_voltage", source=('charge_state', 'charger_voltage'), unit="V", filter_jump=5, send_min_diff=1)
+        self.car_db_data.add_item(name="CAR_charging_state", source=('charge_state', 'charging_state'), unit="")  # can be 'Disconnected', 'Charging', 'Stopped', 'Complete', 'Starting'
+        self.car_db_data.add_item(name="CAR_minutes_to_full_charge", source=('charge_state', 'minutes_to_full_charge'), unit="min")
+        self.car_db_data.add_item(name="CAR_time_to_full_charge", source=('charge_state', 'time_to_full_charge'), unit="h")  # h
+        self.car_db_data.add_item(name="CAR_inside_temp", source=('climate_state', 'inside_temp'), unit="°C", filter_jump=1, send_min_diff=0.5)
+        self.car_db_data.add_item(name="CAR_outside_temp", source=('climate_state', 'outside_temp'), unit="°C")
+        self.car_db_data.add_item(name="CAR_latitude", source=('drive_state', 'latitude'), unit="°")
+        self.car_db_data.add_item(name="CAR_longitude", source=('drive_state', 'longitude'), unit="°")
 
-        self.cardata.add_item(name="CAR_tpms_pressure_fl", source=('vehicle_state', 'tpms_pressure_fl'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
-        self.cardata.add_item(name="CAR_tpms_pressure_fr", source=('vehicle_state', 'tpms_pressure_fr'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
-        self.cardata.add_item(name="CAR_tpms_pressure_rl", source=('vehicle_state', 'tpms_pressure_rl'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
-        self.cardata.add_item(name="CAR_tpms_pressure_rr", source=('vehicle_state', 'tpms_pressure_rr'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
+        self.car_db_data.add_item(name="CAR_tpms_pressure_fl", source=('vehicle_state', 'tpms_pressure_fl'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
+        self.car_db_data.add_item(name="CAR_tpms_pressure_fr", source=('vehicle_state', 'tpms_pressure_fr'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
+        self.car_db_data.add_item(name="CAR_tpms_pressure_rl", source=('vehicle_state', 'tpms_pressure_rl'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
+        self.car_db_data.add_item(name="CAR_tpms_pressure_rr", source=('vehicle_state', 'tpms_pressure_rr'), unit="bar", filter_jump=0.1, send_min_diff=0.1)
 
-        self.cardata.add_item(name="CAR_distance", unit="km")
-        self.cardata.add_item(name="CAR_charge_W", unit="W")
-        self.cardata.add_item(name="CAR_seen_ago", unit="s")
+        self.car_db_data.add_item(name="CAR_distance", unit="km")
+        self.car_db_data.add_item(name="CAR_charge_W", unit="W")
+        self.car_db_data.add_item(name="CAR_seen_ago", unit="s")
 
-        self.refresh(_myCar)  # write all initial data into
+        '''self.get_car_life_data()
+        if self.car_data_cache is None:
+            logger.log("Tesla is asleep")
+            return
+        else:
+            logger.log(f"Tesla: {self.car_data_cache['vin']} at {str(self.car_data_cache['charge_state']['battery_level'])} % SoC with API {self.car_data_cache['api_version']}")
+        '''
 
-    def get_car_data(self):
-        try:
-            tesla = teslapy.Tesla(self.login)
-            vehicles = tesla.vehicle_list()  # asks over API for the list
-            _myCar = vehicles[0]
-            _myCar.get_vehicle_data()  # inserted
-        except ConnectionError as _e:
-            logger.log("Tesla ConnectionError", _e)
-            return None
-        except requests.exceptions.HTTPError as _e:
-            logger.log("Tesla HTTPError", _e)
-            return None
-        except requests.exceptions.ConnectionError as _e:
-            logger.log("Tesla Connection Error", _e)
-            return None
-        except requests.exceptions.ReadTimeout as _e:
-            logger.log("Tesla Timeout", _e)
-            return None
 
-        if _myCar['api_version'] != 63:
-            logger.log("Wrong Tesla API version!")  # fixme send mail
-            file_name = f"API{_myCar['api_version']}_{_myCar['display_name']}_{datetime.datetime.now().isoformat()[:-7].replace(':', '-').replace('T', '_')}.txt"
+    def get_car_life_data(self):
+        r = self.tesla_api.get_vehicle_data(self.vin, 'charge_state;drive_state;location_data;vehicle_state')  # requests LIVE data only -> None if asleep!
+        if r is  None:
+            if self.car_data_cache is not None:
+                self.car_data_cache['state']="asleep" # fake the state
+            self.refresh(self.car_data_cache) # refresh with cached data, just because.
+        else:
+            self.car_data_cache = r
+            self.refresh(r)
 
+
+    def refresh(self, _my_car_data=None):
+
+        if _my_car_data is None:
+            return
+        api = _my_car_data["api_version"]
+        if logToFile or api != APIVERSION:  # check API version and dump when necessary.
+            file_name = f"API{api}_{_my_car_data['vin']}_{datetime.datetime.now().isoformat()[:-7].replace(':', '-').replace('T', '_')}.txt"
             with open(file_name, "w") as file:
-                json.dump(_myCar, file, indent=4)
+                json.dump(_my_car_data, file, indent=4)
 
-            return None # instead of exception
-
-        return _myCar
-
-    def refresh(self, _myCar=None):
-        if _myCar is None:
-            _myCar = self.get_car_data()
-
-        if _myCar is None:
-            logger.log("Tesla connect failed")
-            return None
-
-        # logger.info("read: " + _myCar['display_name'] + ' last seen ' + _myCar.last_seen() + ' at ' + str(_myCar['charge_state']['battery_level']) + '% SoC')
-
-        if logToFile:
-            file_name = f"{_myCar['display_name']}_{datetime.datetime.now().isoformat()[:-7].replace(':', '-').replace('T', '_')}.txt"
-            with open(file_name, "w") as file:
-                json.dump(_myCar, file, indent=4)
+            logger.error(f"Tesla API version {api}")
 
         # update hand-calculated values
-        self.cardata.update_value('CAR_state', _myCar['state'])
+        self.car_db_data.update_value('CAR_state', _my_car_data['state'])
 
-        if (_myCar['charge_state']['charging_state'] == 'Charging' or _myCar['charge_state']['charging_state'] == 'Starting') and \
-                _myCar['charge_state']['charger_actual_current'] is not None and \
-                _myCar['charge_state']['charger_voltage'] is not None:
+        if (_my_car_data['charge_state']['charging_state'] == 'Charging' or _my_car_data['charge_state']['charging_state'] == 'Starting') and \
+                _my_car_data['charge_state']['charger_actual_current'] is not None and \
+                _my_car_data['charge_state']['charger_voltage'] is not None:
             self.is_charging = True
             # this is 3 phase charging
-            if _myCar['charge_state']['charger_phases'] == 2:
-                self.charge_actual_W = _myCar['charge_state']['charger_actual_current'] * _myCar['charge_state']['charger_voltage'] * 3
-                self.charger_allowed_max_W = _myCar['charge_state']['charge_current_request_max'] * _myCar['charge_state']['charger_voltage'] * 3
-            elif _myCar['charge_state']['charger_phases'] == 1:
-                self.charge_actual_W = _myCar['charge_state']['charger_actual_current'] * _myCar['charge_state']['charger_voltage']
-                self.charger_allowed_max_W = _myCar['charge_state']['charge_current_request_max'] * _myCar['charge_state']['charger_voltage']
+            if _my_car_data['charge_state']['charger_phases'] == 2:
+                charge_actual_W = _my_car_data['charge_state']['charger_actual_current'] * _my_car_data['charge_state']['charger_voltage'] * 3
+            elif _my_car_data['charge_state']['charger_phases'] == 1:
+                charge_actual_W = _my_car_data['charge_state']['charger_actual_current'] * _my_car_data['charge_state']['charger_voltage']
             else:
-                logger.log("Phases are hard", _myCar['charge_state']['charger_phases'])
-                self.charge_actual_W = 0
-                self.charger_allowed_max_W = 0
-
-
-
+                logger.log(f"Phases are hard, {_my_car_data['charge_state']['charger_phases']}")
+                charge_actual_W = 0
         else:
             self.is_charging = False
-            self.charge_actual_W = 0
-            self.charger_allowed_max_W = 1000
+            charge_actual_W = 0
 
-        self.cardata.update_value("CAR_charge_W", self.charge_actual_W)
+        self.car_db_data.update_value("CAR_charge_W", charge_actual_W)
 
-        if "drive_state" in _myCar:
-            loc = (_myCar["drive_state"]["latitude"], _myCar["drive_state"]["longitude"])
-            self.last_distance = calculate_distance(home[0], home[1], loc[0], loc[1])
-            self.last_distance_time = _myCar['drive_state']['timestamp'] / 1000
-            # logger.log(f"The distance between the coordinates is {self.last_distance:.2f} km.")
-            self.cardata.update_value("CAR_distance", self.last_distance)
+        if "drive_state" in _my_car_data:
+            if "latitude" in _my_car_data["drive_state"]:
+                loc = (_my_car_data["drive_state"]["latitude"], _my_car_data["drive_state"]["longitude"])
+                self.last_distance = calculate_distance(home[0], home[1], loc[0], loc[1])
+                #last_distance_time = _my_car_data['drive_state']['timestamp'] / 1000
+                # logger.log(f"The distance between the coordinates is {self.last_distance:.2f} km.")
+                self.car_db_data.update_value("CAR_distance", self.last_distance)
 
-        self.last_seen_s = time.time() - _myCar['charge_state']['timestamp'] / 1000
-        self.cardata.update_value("CAR_seen_ago", self.last_seen_s)
+        last_seen_s = time.time() - _my_car_data['charge_state']['timestamp'] / 1000
+        self.car_db_data.update_value("CAR_seen_ago", last_seen_s)
 
         # update member values
-        self.current_request = _myCar['charge_state']['charge_current_request']  # avoid control at 16A
-        self.current_actual = _myCar['charge_state']['charger_actual_current']
-
-        # = _myCar['charge_state']['charger_actual_current']
-        self.is_ready_to_charge = _myCar['charge_state']['conn_charge_cable'] == 'IEC' and _myCar['charge_state']['charging_state'] in ['Charging', 'Stopped']  # not , 'Complete'
+        self.current_request = _my_car_data['charge_state']['charge_current_request']  # avoid control at 16A
+        self.current_actual = _my_car_data['charge_state']['charger_actual_current']
 
         # update all values with a defined source
-        for i in self.cardata.get_name_list():
-            s = self.cardata.get_source(i)
+        for i in self.car_db_data.get_name_list():
+            s = self.car_db_data.get_source(i)
             if s is not None:
-                v = get_item(_myCar, s)
+                # print(s)
+                v = get_item(_my_car_data, s)
                 if v is not None:  # do not update None values as this is completely normal for e.g. "drive_state" to not be in the data
-                    self.cardata.update_value(i, v)
+                    self.car_db_data.update_value(i, v)
                     # logger.info(i,v,s)
                 else:
                     pass
                     # logger.info(i, "NONE", s)
 
-        self.cardata.write_measurements()
+        self.car_db_data.write_measurements()
 
-        return _myCar
+        return _my_car_data
 
-    def wake_up(self):
-        _myCar = self.get_car_data()
-        if _myCar is None:
-            logger.log("Tesla connect fail on wake")
-            return
 
-        if _myCar['state'] == "asleep":
-            logger.info("waiting for wake")
-            try:
-                _myCar.sync_wake_up(timeout=30)  ### wakes vehicle up !!!
-            except Exception as e:
-                logger.log(f"Tesla did not wake up within 30s {type(e)}: {e}")
-            self.refresh()  # update data / read again!
 
-    def is_ready(self):  # check, if car is ready according last data - without asking!
-
-        kmph = 60
-        kmps = kmph / 3600
-        fastetst_time_to_return_s = self.last_distance / kmps
+    def is_here_and_connected(self):  # check, if car is ready according last data - without asking!
         # Car is not here
         if self.last_distance > 0.3:
-            # logger.info(f"Car is {self.last_distance}km away, time to return {fastetst_time_to_return_s / 60}[min]")
+            logger.debug(f"Tesla is {self.last_distance}km away")
+            return False
+
+        if self.car_data_cache is None or not 'charge_state' in self.car_data_cache:
+            logger.debug("Tesla no info")
             return False
 
         # check car state
-        if not self.is_ready_to_charge:
-            # logger.info("Car is not connected")
+        if not self.car_data_cache['charge_state']['conn_charge_cable'] == 'IEC':
+            logger.debug("Tesla is not connected")
             return False
 
-        if self.current_request == 16:
-            # logger.info("Überschuss-laden nicht gewünscht - Ende hier!")
+        if not self.car_data_cache['charge_state']['charging_state'] in ['Charging', 'Stopped']:  # not 'Complete'
+            logger.debug("Tesla is not in right mood")
             return False
-
-        # also at night, we can ignore the car.
-        # Get the current time
-        current_time = datetime.datetime.now().time()
-        start_time = datetime.time(6, 0)
-        end_time = datetime.time(20, 0)
-        if start_time <= current_time <= end_time:
-            pass
-        else:
-            # logger.info("Too late for charging, there will be no sun")
-            pass  # return False fixme
-
-        # Info too old
-        '''
-        # avoid wake due to program start and older than return time + 5h -> wake up
-        if self.last_distance_time != 0 and (time.time() - self.last_distance_time) > fastetst_time_to_return_s + 60 * 60 * 5:
-            self.wake_up()
-            logger.info("Wake up car, cos I don't know where it is.")
-            return False
-        '''
         return True
 
-    def set_charge(self, _do_charge, _req_power_w):
-        _myCar = self.get_car_data()
-        if _myCar is None:
-            logger.log("Tesla connect fail on set_charge")
+
+    def set_charge(self, _do_charge, _req_power_w): # fixme check, if really useful to charge in W, when we calculate A before?!?
+        if not self.is_here_and_connected():
+            logger.info("Tesla is not ready, but should be!")
             return False
 
-        self.refresh(_myCar)  # update data
-
-        if not self.is_ready():  # do this after the update to get fresh info.
-            logger.info("Car is not ready, but should be!")
-            return False
-
-        if _myCar['state'] == "asleep" and _do_charge and _req_power_w > 500:
-            logger.info("Wake up car, cos I want to charge")
-            self.wake_up()
+        if self.car_data_cache['state'] == "asleep" and _do_charge and _req_power_w > 500:
+            logger.info("Tesla - Wake up car, cos I want to charge")
+            self.tesla_api.cmd_wakeup(self.vin)
+            #leave here and set the commanded value later - so we will have a re-entry.
+            return
 
         # I = P / U
-        if _myCar['charge_state']['charger_phases'] == 2:
+        if self.car_data_cache['charge_state']['charger_phases'] == 2:
             amps = _req_power_w / (230 * 3)
-        elif _myCar['charge_state']['charger_phases'] == 1:
+        elif self.car_data_cache['charge_state']['charger_phases'] == 1:
             amps = _req_power_w / 230
         else:
-            logger.log("Unexpected value: charging phases are weird.")
+            logger.error("Tesla: Unexpected value: charging phases are weird.")
             return False
+
+        maxamps = self.car_data_cache['charge_state']['charge_current_request_max']
+        if amps > maxamps:
+            logger.error(f"Tesla: prevent to charge more than {maxamps} A. - {amps} A requested.")
+            amps = maxamps
 
         ampere_rounded = round(amps, 0)
 
@@ -302,48 +231,53 @@ class Car:
             _do_charge = False
 
             # charge_state can be 'Disconnected', 'Charging', 'Stopped', 'Complete', 'Starting'
-        if _myCar['charge_state']['charging_state'] == 'Charging' and not _do_charge:
-            logger.info(f"charging stopped at {self.charge_actual_W:.2f} W")
+        if self.car_data_cache['charge_state']['charging_state'] == 'Charging' and not _do_charge:
+            logger.info(f"charging stopped at {self.car_data_cache['charge_state']['charger_actual_current']} A")
             try:
-                _myCar.command('STOP_CHARGE')
-                _myCar.command('CHARGING_AMPS', charging_amps=1)  # set minimum amps after stop
+                self.tesla_api.cmd_charge_stop(self.vin)
+                self.tesla_api.cmd_charge_set_amps(self.vin, 5)
             except Exception as e:
                 logger.log(f"Exception during stopping charge {type(e)}: {e}")
-            self.refresh()  # read again
+            self.car_data_cache['charge_state']['charging_state'] = 'Stopped' # remember the state!
+            self.refresh(self.car_data_cache)  # publish again
             return True  # finished here, as all else is related to setting the current
 
         if _req_power_w > 11000:
-            logger.log("WATT is wrong with you", _req_power_w)
+            logger.log(f"WATT is wrong with you, {_req_power_w}")
             return False
 
-        if _myCar['charge_state']['charging_state'] == 'Stopped' and _do_charge:
+        if self.car_data_cache['charge_state']['charging_state'] == 'Stopped' and _do_charge:
             try:
-                _myCar.command('START_CHARGE')
+                self.tesla_api.cmd_charge_start(self.vin)
             except Exception as e:
                 logger.log(f'Exception during starting charge {type(e)}: {e}')
             logger.info("car charging started")
-            _myCar = self.refresh()  # read again and forward the new info for calculating the new powah
 
-        if not (_myCar['charge_state']['charging_state'] == 'Charging' or _myCar['charge_state']['charging_state'] == 'Starting'):
+
+        if not (self.car_data_cache['charge_state']['charging_state'] == 'Charging' or self.car_data_cache['charge_state']['charging_state'] == 'Starting'):
             # ampere_rounded = 5
             # logger.info(f"Car is not charging and we set the amps to {ampere_rounded}")
             return False
 
         if ampere_rounded > 15:
-            logger.log("too many amps requested", ampere_rounded)
+            logger.log(f"too many amps requested, {ampere_rounded}")
             return False
 
-        if _myCar['charge_state']['charge_current_request'] != ampere_rounded:  # only send, if different
+        if self.car_data_cache['charge_state']['charge_current_request'] != ampere_rounded:  # only send, if different
             r = False
             try:
-                r = _myCar.command('CHARGING_AMPS', charging_amps=int(ampere_rounded))
+                _res = self.tesla_api.cmd_charge_set_amps(self.vin, int(ampere_rounded))
+                if _res is True:
+                    # if successful, we update the self.car_data_cache['charge_state']['charge_current_request']
+                    # so we do not have to read it back.
+                    self.car_data_cache['charge_state']['charge_current_request'] = int(ampere_rounded)
+
             except Exception as e:
                 logger.log(f"Exception during changing charge request {type(e)}: {e}")
-            # logger.info("Charge current changed", ampere_rounded, r)
-            # self.refresh()  # read again! not needed - works great without.
+
             return r
         else:
-            logger.info("Charge current ok", ampere_rounded)
+            logger.info(f"Charge current ok, {ampere_rounded}")
             return True
 
 
@@ -351,18 +285,18 @@ class Car:
 
 
 if __name__ == '__main__':
-    # import database
-    # import time
 
-    myTesla = Car(tesla_login)
+    myTeslaAPI = tesla_api_2024.TeslaAPI()
+
+    myTesla = TeslaCar(config.tesla_vin, myTeslaAPI)
+
+    time.sleep(1)
+
+    myTesla.get_car_life_data()
 
     time.sleep(15)
 
-    myTesla.refresh()
-
-    time.sleep(15)
-
-    myTesla.refresh()
+    myTesla.get_car_life_data()
 
     # myTesla.set_charge(False, 1230)
 

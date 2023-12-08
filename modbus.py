@@ -1,6 +1,7 @@
 import serial
 import struct
-from logger import logger
+from lib.logger import Logger
+logger = Logger()
 
 # Define the hex string to send to the Modbus RTU device
 
@@ -161,7 +162,7 @@ class Bestep2Relays(Device):
             # hex_string = '{:02x}'.format(addr) + "10 00 03 00 02 04 00 04 00 32"  # rel 1 for 5s (0x32 = 50 *0.1s)
             # hex_string = '{:02x}'.format(addr) + "10 00 03 00 02 04 00 02 00 1E" UUUUh
             if timeout > 6553:
-                logger.log("timeout for Relais too long!", timeout)
+                logger.log(f"timeout for Relais too long!, {timeout}")
                 return
             hex_string = '{:02x}'.format(self.address) + "10 00 " + '{:02x}'.format(
                 relay_address) + " 00 02 04 00 04" + '{:04x}'.format(int(timeout * 10))

@@ -1,8 +1,11 @@
 # the general database magic.
-
+import datetime
 import math
 import time
-from logger import logger
+from lib.logger import Logger
+logger = Logger()
+#from typing import List, Dict
+import pytz
 
 from influxdb import InfluxDBClient
 
@@ -39,24 +42,29 @@ class MeasurementList:
 
 
     # the value is also filtered by the filter_std_time factor.
-    def update_value(self, name, new_value):
+    def update_value(self, name, new_value, _time: time = None):
+        if _time is None:
+            _time = time.time()
+
         if name in self.__data:
             # if self.__data[name]['value'] is None: logger.info(f"Data {name} is None")  # debug
             # take unfiltered?
             if new_value is None or \
                     isinstance(new_value, str) or\
                     self.__data[name]['value'] is None or \
-                    self.__data[name]['value_filtered'] is None:
+                    self.__data[name]['value_filtered'] is None or\
+                    self.__data[name]['value_last_update_time'] is None:
 
-                self.__data[name]['value_last_update_time'] = time.time()
+                self.__data[name]['value_last_update_time'] = _time
                 self.__data[name]['value_filtered'] = new_value
                 self.__data[name]['value'] = new_value
             else:
-                current_time = time.time()
-                delta_time = current_time - self.__data[name]['value_last_update_time']
-
-                alpha_std = delta_time / (self.__data[name]['filter_std_time'] + delta_time)
-                v = alpha_std * new_value + (1 - alpha_std) * self.__data[name]['value']
+                delta_time = _time - self.__data[name]['value_last_update_time']
+                if delta_time == 0 or self.__data[name]['filter_std_time'] == 0:
+                    v = new_value
+                else:
+                    alpha_std = delta_time / (self.__data[name]['filter_std_time'] + delta_time)
+                    v = alpha_std * new_value + (1 - alpha_std) * self.__data[name]['value']
                 self.__data[name]['value'] = v # normal filter does not do jumps
 
                 alpha_flt = delta_time / (self.__data[name]['filter_time'] + delta_time)
@@ -66,7 +74,7 @@ class MeasurementList:
                 else:
                     self.__data[name]['value_filtered'] = vf
 
-                self.__data[name]['value_last_update_time'] = current_time
+                self.__data[name]['value_last_update_time'] = _time
 
         else:
             logger.log(f"{name} does not exist in the data.")
@@ -97,47 +105,32 @@ class MeasurementList:
         # translate into shape, the Influx likes
         r=[]
         for i in self.__data:
-            difTime = time.time() - self.__data[i]['send_last_time']
-            # fixme missing timestamp transfer
-            '''
-            import time
-            from datetime import datetime
-                        # Get the current time in seconds since the epoch (UTC)
-            epoch_time = time.time()
-            
-            # Convert to a datetime object (also in UTC)
-            current_time = datetime.utcfromtimestamp(epoch_time)
-            
-            # Convert to an ISO 8601 formatted string
-            iso_time = current_time.isoformat() + "Z"
-            
-            # Create a new data point for InfluxDB
-            data_point = {
-                "measurement": "your_measurement",
-                "time": iso_time,
-                "fields": {
-                    "your_field": "your_value"
-                }
-            }
+            ts = self.__data[i]['value_last_update_time']
+            if ts is None: ts = time.time()
 
-            
-            '''
+            difTime = ts - self.__data[i]['send_last_time']
+            # do timestamp transfer
+
+            ts_dt = datetime.datetime.utcfromtimestamp(ts)  # Convert to a datetime object (also in UTC)
+            ts_iso = ts_dt.isoformat() + "Z"  # Convert to an ISO 8601 formatted string
+
             #decide, if the value can be filtered
             if (type(self.__data[i]['value']) == float or type(self.__data[i]['value']) == int) and self.__data[i]['send_last_value']  is not None:
                 # check, if __data has changed enough
                 difValue = abs(self.__data[i]['send_last_value'] - self.__data[i]['value'])
                 try:
-                    if self.__data[i]['value'] is not None and (difValue >= self.__data[i]['send_min_diff'] or difTime >= self.__data[i]['send_max_time']):
+                    if difValue >= self.__data[i]['send_min_diff'] or difTime >= self.__data[i]['send_max_time']:
                         r.append({
                         "measurement": i,
+                        "time": ts_iso, #fixme
                         "tags": {"type": self.__data[i]['unit']},
                         "fields": {"value": float(self.__data[i]['value']), # avoid storing as int !!!! - database does not like floats on top of ints.
                                    "value_": float(self.__data[i]['value_filtered'])},
                         })
                         self.__data[i]['send_last_value'] = self.__data[i]['value']
-                        self.__data[i]['send_last_time'] = time.time()
+                        self.__data[i]['send_last_time'] = ts
                 except:
-                    logger.log("Database encode FAIL",i,self.__data[i]['value'])
+                    logger.log(f"Database encode FAIL{i} {self.__data[i]['value']}")
 
             else:
                 # non calculatable stuff
@@ -149,15 +142,35 @@ class MeasurementList:
 
                     r.append({
                     "measurement": i,
+                    "time": ts_iso, #fixme
                     "tags": {"type": self.__data[i]['unit']},
                     "fields": {"value": nv},
                     })
                     self.__data[i]['send_last_value'] = self.__data[i]['value']
-                    self.__data[i]['send_last_time'] = time.time()
+                    self.__data[i]['send_last_time'] = ts
         return r
+
 
     def write_measurements(self):
         self.client.write_points(self.get_wellformed_array())
 
 
+
+    def write_list(self, data):
+        """
+        Process a list of tuples containing 'name', 'time', and 'value' keys.
+        """
+        dat = []
+        for nam, tim, val in data:
+            # Create a new data point
+            data_point = {
+                "measurement": nam,
+                "time": tim.astimezone(pytz.utc).isoformat(),  # Convert to UTC time for InfluxDB
+                "fields": {
+                    "value": val
+                }
+            }
+            dat.append(data_point)
+
+        self.client.write_points(dat)
 
