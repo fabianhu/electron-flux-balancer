@@ -33,7 +33,7 @@ import logging
 import config
 import modbus
 import tesla_interface
-import lib.tesla.tesla_api_2024
+import lib.tesla_api.tesla_api_2024
 import lib.tibber
 from lib.measurementlist import MeasurementList
 import time
@@ -102,7 +102,7 @@ class ElectronFluxBalancer:
         self.heating_measurements.add_item(name="CAR Charge command", unit="%", filter_jump=1000, filter_time=60, source=None, filter_std_time=0, send_min_diff=100)  # updated only if value changes
         self.heating_measurements.add_item(name="HEAT power command", unit="%", filter_jump=1000, filter_time=60, source=None, filter_std_time=0, send_min_diff=100)
 
-        self.myTesla = tesla_interface.TeslaCar(config.tesla_vin, lib.tesla.tesla_api_2024.TeslaAPI())
+        self.myTesla = tesla_interface.TeslaCar(config.tesla_vin, lib.tesla_api.tesla_api_2024.TeslaAPI())
 
         # timing stuff
         #self.last_car_update = time.time()

@@ -6,12 +6,12 @@
 /parameters.json
 /ESP32_display/.pio/
 /ESP32_display/.vscode
-/lib/tesla/TeslaKeys/privatekey.pem
-/lib/tesla/TeslaKeys/publickey.pem
+/lib/tesla_api/TeslaKeys/privatekey.pem
+/lib/tesla_api/TeslaKeys/publickey.pem
 /tesla_tokens.json
 /tesla-control/tesla-control
 /lib/tesla/.temp_token
-/lib/tesla/tesla-control/tesla-control
+/lib/tesla_api/tesla-control/tesla-control
 /*.log
 *__pycache__*
 *.temp_token

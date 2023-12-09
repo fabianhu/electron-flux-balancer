@@ -14,7 +14,7 @@ logger = Logger(logging.INFO, "tesla.log")
 
 from config import home
 
-from lib.tesla import tesla_api_2024
+from lib.tesla_api import tesla_api_2024
 
 logToFile = False
 APIVERSION = 69
