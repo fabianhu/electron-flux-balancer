@@ -216,7 +216,7 @@ class Tibber:
         if datetime.now()-self.price_time > timedelta(hours=6):
             self.update_price_info()
 
-        target_hour = 9  #todo parameter
+        target_hour = 8  #todo parameter
         latest_end = (datetime.now(timezone.utc).replace(hour=target_hour, minute=0, second=0, microsecond=0) + timedelta(days=(datetime.now().hour >= target_hour)))
 
         new_dict = {}

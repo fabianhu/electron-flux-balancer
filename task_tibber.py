@@ -7,7 +7,7 @@ from lib.tibber import Tibber
 from datetime import datetime, timedelta
 from lib.logger import Logger
 import logging
-logger = Logger(logging.DEBUG, "tibber.log")
+logger = Logger(logging.INFO, "tibber.log")
 
 from lib.tibber.tibber import tibber_time_to_datetime
 from lib.measurementlist import MeasurementList
@@ -32,7 +32,7 @@ def do_tibber_to_influx():
             logger.debug("Tibber refreshed")
             if len(myTibber.prices) == 48:
                 logger.debug("Tibber refreshed with all data")
-                do_get_price = False
+                do_get_price = False  # fixme nerv around and look all Vormittag?
             else:
                 logger.debug(f"Tibber refreshed, but did only get {len(myTibber.prices)} data")
 
@@ -58,6 +58,8 @@ def check_battery(_house_soc):
     global charge_start_dt
     global is_battery_planning_init
 
+    if _house_soc is None: return None
+
     PLANNING_SCHEDULE_HOUR = 21
     LOOK_HOURS_FORWARD = 12 # how far to plan the next charge
     LOOK_HOURS_SPREAD = LOOK_HOURS_FORWARD + 6 # how far to look for the spread e.g. 21 + 12 = 9 +6 = 15 h
@@ -70,8 +72,8 @@ def check_battery(_house_soc):
     timezone = pytz.timezone('Europe/Berlin')
     current_time = datetime.now(timezone)
 
-    # we plan every hour
-    if current_time.minute == 0 and current_time.minute == PLANNING_SCHEDULE_HOUR or is_battery_planning_init:  # fixme avoid to do twice at 30s interval (but nevermind, should not bother)
+    # we plan at start of hour PLANNING_SCHEDULE_HOUR
+    if current_time.minute == 0 and current_time.minute == PLANNING_SCHEDULE_HOUR or is_battery_planning_init:  # avoid to do twice at 30s interval (but nevermind, should not bother)
         # calculate the best charging time
         is_battery_planning_init = False
 
@@ -84,11 +86,11 @@ def check_battery(_house_soc):
         # Find max and min prices
         if prices_next_h:
             spread = max(prices_next_h) - min(prices_next_h)
-            logger.debug(f"Price spread in the next {LOOK_HOURS_SPREAD} hours: {spread}")
+            logger.info(f"Price spread in the next {LOOK_HOURS_SPREAD} hours: {spread}")
             if spread > SPREAD_FOR_CHARGE and _house_soc < SOC_TARGET:
                 # set start time of planned charge
                 charge_start_dt = myTibber.cheapest_charging_time(_house_soc, SOC_TARGET, capacity_kWh, max_power_kW)
-                logger.debug(f"Ok, it may be useful to charge the batt at {charge_start_dt}")
+                logger.info(f"Ok, it may be useful to charge the batt at {charge_start_dt}")
             else:
                 charge_start_dt = None
         else:
@@ -99,7 +101,7 @@ def check_battery(_house_soc):
         return None
 
     #safety timer
-    if 5 < current_time.hour < 22:
+    if 5 < current_time.hour < 21:
         logger.debug("outside of business hours")
         return None
 

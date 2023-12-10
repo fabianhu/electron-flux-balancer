@@ -49,10 +49,10 @@ class ParameterServer:
         self.app = Flask(__name__)
         self.app.route('/', methods=['GET', 'POST'])(self.index)
         self.PARAMETERFILE = 'parameters.json'
-        self.PAGENAME = "EFB parameter interface"
+        self.PAGENAME = "ElectronFluxBalancer parameter interface"
         self.central_parameters = {
             'Charge car above house SOC': {'min': 10, 'max': 50, 'unit': '%', 'type': 'number', 'step': 1},
-            'Boiler setpoint': {'min': -50, 'max': 65, 'unit': '°C', 'type': 'number', 'step': 0.5},
+            'Boiler setpoint': {'min': 10, 'max': 65, 'unit': '°C', 'type': 'number', 'step': 0.5},
             'Charge from grid car below': {'min': 0.0, 'max': 0.6, 'unit': '€', 'type': 'number', 'step': 0.01},
             'Enable grid charge': {'options': ['on', 'off'], 'unit': '', 'type': 'enum'}
         }

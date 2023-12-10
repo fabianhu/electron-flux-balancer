@@ -122,7 +122,7 @@ class MeasurementList:
                     if difValue >= self.__data[i]['send_min_diff'] or difTime >= self.__data[i]['send_max_time']:
                         r.append({
                         "measurement": i,
-                        "time": ts_iso, #fixme
+                        "time": ts_iso,
                         "tags": {"type": self.__data[i]['unit']},
                         "fields": {"value": float(self.__data[i]['value']), # avoid storing as int !!!! - database does not like floats on top of ints.
                                    "value_": float(self.__data[i]['value_filtered'])},
@@ -142,7 +142,7 @@ class MeasurementList:
 
                     r.append({
                     "measurement": i,
-                    "time": ts_iso, #fixme
+                    "time": ts_iso,
                     "tags": {"type": self.__data[i]['unit']},
                     "fields": {"value": nv},
                     })

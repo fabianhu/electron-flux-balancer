@@ -130,7 +130,7 @@ class ElectronFluxBalancer:
         self.car_charge_amp = 0  #fixme move to Tesla!
         self.car_charging_phases = 3 #fixme move to Tesla!
 
-        self.last_tibber_schedule = datetime.now()-timedelta(days=2)
+        self.last_tibber_schedule = datetime.now()-timedelta(days=2) # set to the past
 
         self.tas = tasmota.Tasmotas()
 
@@ -415,7 +415,7 @@ class ElectronFluxBalancer:
         heat_pwr = map_sym_to_percentage(self.heating_measurements.get_value_filtered('HEAT power command'),3000)
         export_power = map_sym_to_percentage(self.sg.measurements.get_value_filtered('ELE Export power'),5000)
 
-        price = 0.15  # fixme
+        price = 0.15  # todo - display can not yet handle it
 
         push_displays(generated_power, battery_soc, battery_pwr, car_soc, car_pwr, heat_soc, heat_pwr, export_power, price)
         #logger.info(generated_power, battery_soc, battery_pwr, car_soc, car_pwr, heat_soc, heat_pwr, export_power, price)
@@ -424,12 +424,15 @@ class ElectronFluxBalancer:
     def do_tesla_tibber_planning(self):
         from task_tibber import myTibber
 
+        TIBBER_CAR_CHARGE_CURRENT = 16 # todo parameter
+
         now = datetime.now()
         #fixme take into account the time of last connection?
         if now-self.last_tibber_schedule > timedelta(hours=12) and self.myTesla.is_here_and_connected():
 
             soc = self.myTesla.car_db_data.get_value("CAR_battery_level")
             soclim = self.myTesla.car_db_data.get_value("CAR_charge_limit_soc")
+            charge_current_request = self.myTesla.car_db_data.get_value("CAR_charge_current_request")
             if soc is None or soclim is None:
                 logger.error("Tibber Charge Plan no info from Tesla")
                 return
@@ -437,7 +440,11 @@ class ElectronFluxBalancer:
             if mins is None:
                 logger.error(f"Tibber we had no result from {myTibber.prices}")
                 return
-            self.myTesla.tesla_api.cmd_charge_set_schedule(self.myTesla.vin,mins)
+            self.myTesla.tesla_api.cmd_charge_set_schedule(self.myTesla.vin, mins)
+            # fixme check and set charge current to 16A / 13A whatever is possible
+            if charge_current_request != TIBBER_CAR_CHARGE_CURRENT:
+                self.myTesla.tesla_api.cmd_charge_set_amps(self.myTesla.vin, TIBBER_CAR_CHARGE_CURRENT)
+
             self.last_tibber_schedule = now
             logger.debug(f"Tibbering {mins/60} h")
 

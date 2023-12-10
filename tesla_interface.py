@@ -183,6 +183,7 @@ class TeslaCar:
         # Car is not here
         if self.last_distance > 0.3:
             logger.debug(f"Tesla is {self.last_distance}km away")
+            # todo something like self.last_tibber_schedule = datetime.now()-timedelta(days=2) # set to the past
             return False
 
         if self.car_data_cache is None or not 'charge_state' in self.car_data_cache:
@@ -235,7 +236,7 @@ class TeslaCar:
             logger.info(f"charging stopped at {self.car_data_cache['charge_state']['charger_actual_current']} A")
             try:
                 self.tesla_api.cmd_charge_stop(self.vin)
-                self.tesla_api.cmd_charge_set_amps(self.vin, 5)
+                self.tesla_api.cmd_charge_set_amps(self.vin, 5) # fixme why?
             except Exception as e:
                 logger.log(f"Exception during stopping charge {type(e)}: {e}")
             self.car_data_cache['charge_state']['charging_state'] = 'Stopped' # remember the state!

@@ -1,5 +1,6 @@
 # Sungrow modbus TCP interface
 # works with SH10RT
+import datetime
 
 from pymodbus.client import ModbusTcpClient
 from lib.measurementlist import MeasurementList
@@ -27,7 +28,7 @@ class SungrowSH:
         sw_DSP = extract_string_from_data(r.registers, 4 + 15, 15)
 
         logger.info(f"SungrowSH, {ver}, {sw_ARM}, {sw_DSP}")
-
+        with open("sungrow_version.txt", "a") as f: f.write(f"{datetime.datetime.now()} SungrowSH, {ver}, {sw_ARM}, {sw_DSP}\n")
 
         self.measurements.add_item(name='ELE Nominal Output Power', unit="W", send_min_diff=10.0, filter_time=30, filter_jump=2000, source={'address': 5000, 'data_type': 'uint16be', 'factor': 0.1})
         self.measurements.add_item(name='ELE Inside Temperature', unit='°C', send_min_diff=0.5, filter_time=30, filter_jump=5, source={'address': 5007, 'data_type': 'int16be', 'factor': 0.1})
