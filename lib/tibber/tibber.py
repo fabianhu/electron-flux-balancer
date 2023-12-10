@@ -23,6 +23,9 @@ def tibber_time_to_datetime(time_string: str)-> datetime:
     return dt
 
 def datetime_to_minutes_after_midnight(dt: datetime)-> int:
+    if dt is None:
+        return None
+
     # Return the start time based on 'startsAt'
     minutes_after_midnight = dt.hour * 60 + dt.minute
 

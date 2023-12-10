@@ -32,6 +32,7 @@ import logging
 
 import config
 import modbus
+import task_tibber
 import tesla_interface
 import lib.tesla_api.tesla_api_2024
 import lib.tibber
@@ -146,7 +147,7 @@ class ElectronFluxBalancer:
         taskctl.add_task("displays", self.do_display_update, 10, 10)
 
         import task_tibber
-        taskctl.add_task("tibber", task_tibber.do_tibber, 60, 30)
+        taskctl.add_task("tibber", task_tibber.do_tibber_to_influx, 60, 30)
 
         # do them inside the main task, because of modbus being picky.
         # taskctl.add_task("temperature", self.do_temperature_update, 3, 10)
@@ -183,13 +184,8 @@ class ElectronFluxBalancer:
     def do_car_update(self):  # every 5 min
         self.myTesla.get_car_life_data()
 
-        # todo maybe check the current charging schedule before sending a command?
+        self.do_tesla_tibber_planning()
 
-        now = datetime.now()
-        if now-self.last_tibber_schedule > timedelta(hours=12) and self.myTesla.is_here_and_connected():
-            logger.debug("Tibbering")
-            self.do_tesla_tibber_planning()
-            self.last_tibber_schedule = now
 
     def do_sungrow_update(self):
         self.sg.update()  # get values from Wechselrichter
@@ -253,11 +249,16 @@ class ElectronFluxBalancer:
         battery_soc = self.sg.measurements.get_value('ELE Battery level')
         car_charge_power = self.myTesla.car_db_data.get_value_filtered('CAR_charge_W')
 
-        # stop the battery on high load from car. # fixme control battery at same point.
+        batrecommend = task_tibber.check_battery(battery_soc)
+
+        # stop DISCHARGING the battery on high load from car and control battery at same point.
         if self.myTesla.is_here_and_connected() and car_charge_power > 10000:
-            self.sg.set_forced_charge(0)
+            if batrecommend is None:
+                self.sg.set_forced_charge(0)
+            else:
+                self.sg.set_forced_charge(batrecommend)
         else:
-            self.sg.set_forced_charge(None)
+            self.sg.set_forced_charge(batrecommend)
 
 
         # ready for solar overflow charging
@@ -422,13 +423,24 @@ class ElectronFluxBalancer:
 
     def do_tesla_tibber_planning(self):
         from task_tibber import myTibber
-        soc = self.myTesla.car_db_data.get_value("CAR_battery_level")
-        soclim = self.myTesla.car_db_data.get_value("CAR_charge_limit_soc")
-        if soc is None or soclim is None:
-            logger.error("Tibber Charge Plan no info from Tesla")
-            return
-        mins = lib.tibber.tibber.datetime_to_minutes_after_midnight(myTibber.cheapest_charging_time(soc,soclim))
-        self.myTesla.tesla_api.cmd_charge_set_schedule(self.myTesla.vin,mins)
+
+        now = datetime.now()
+        #fixme take into account the time of last connection?
+        if now-self.last_tibber_schedule > timedelta(hours=12) and self.myTesla.is_here_and_connected():
+
+            soc = self.myTesla.car_db_data.get_value("CAR_battery_level")
+            soclim = self.myTesla.car_db_data.get_value("CAR_charge_limit_soc")
+            if soc is None or soclim is None:
+                logger.error("Tibber Charge Plan no info from Tesla")
+                return
+            mins = lib.tibber.tibber.datetime_to_minutes_after_midnight(myTibber.cheapest_charging_time(soc,soclim))
+            if mins is None:
+                logger.error(f"Tibber we had no result from {myTibber.prices}")
+                return
+            self.myTesla.tesla_api.cmd_charge_set_schedule(self.myTesla.vin,mins)
+            self.last_tibber_schedule = now
+            logger.debug(f"Tibbering {mins/60} h")
+
 
 
 

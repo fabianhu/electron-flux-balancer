@@ -172,5 +172,5 @@ class MeasurementList:
             }
             dat.append(data_point)
 
-        self.client.write_points(dat)
+        return self.client.write_points(dat)
 
