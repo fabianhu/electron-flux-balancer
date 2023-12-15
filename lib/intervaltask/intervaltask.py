@@ -15,7 +15,13 @@ class TaskController:
 
     def add_task(self, name, func, interval, watchdog_timeout):
         t = threading.Thread(target=self._run_task, args=(name,))
-        self.tasks[name] = {'func': func, 'interval': interval, 'watchdog_timeout': watchdog_timeout, 'thread': t, 'runtime': 0.0}
+        self.tasks[name] = {
+            'func': func,
+            'original_func': func,  # Store a copy of the original function
+            'interval': interval,
+            'watchdog_timeout': watchdog_timeout,
+            'thread': t,
+            'runtime': 0.0}
         t.start()
 
     def is_task_running(self, name):
@@ -35,7 +41,9 @@ class TaskController:
             start_time = time.time()
 
             if not callable(func):
-                logger.log(f"Task not callable: , {func}, {self.tasks[name]}") # fixme check, how to recover
+                logger.log(f"Task {name} not callable: {func}, {self.tasks[name]}") # fixme check, how to recover
+                self.log_func_details(func, name)
+                self.tasks[name]['func'] = self.tasks[name]['original_func']  # Restore original function
             else:
                 try:
                     func()
@@ -43,6 +51,7 @@ class TaskController:
                     tb = traceback.extract_tb(e.__traceback__)
                     filename, line, func, text = tb[-1]
                     logger.log(f"Exception occurred in task {name} in file {filename} at line {line}: Exception : {e}")
+                    logger.log(f"Traceback: {traceback.format_exc()}")
 
 
                 end_time = time.time()
@@ -69,6 +78,13 @@ class TaskController:
                 self.tasks[name]['thread'] = t
                 t.start()
 
+    def log_func_details(self, func, task_name):
+        logger.log(f"Details of non-callable task '{task_name}':")
+        logger.log(f"Type: {type(func)}")
+        logger.log(f"String representation: {func}")
+        logger.log(f"Attributes: {dir(func)}")
+        if hasattr(func, '__dict__'):
+            logger.log(f"Object dictionary: {func.__dict__}")
 
 # Example usage
 def task1():

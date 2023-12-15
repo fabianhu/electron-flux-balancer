@@ -443,7 +443,9 @@ class ElectronFluxBalancer:
             self.myTesla.tesla_api.cmd_charge_set_schedule(self.myTesla.vin, mins)
             # fixme check and set charge current to 16A / 13A whatever is possible
             if charge_current_request != TIBBER_CAR_CHARGE_CURRENT:
-                self.myTesla.tesla_api.cmd_charge_set_amps(self.myTesla.vin, TIBBER_CAR_CHARGE_CURRENT)
+                pass
+                # fixme might not be smart, as we could be solar-charging with low current right now. Check, if we can constrict the planning after sunset?
+                # self.myTesla.tesla_api.cmd_charge_set_amps(self.myTesla.vin, TIBBER_CAR_CHARGE_CURRENT)
 
             self.last_tibber_schedule = now
             logger.debug(f"Tibbering {mins/60} h")

@@ -118,21 +118,9 @@ class Tibber:
         }
         """
 
-        # Create the header
-        headers = {
-            'Authorization': f'Bearer {self.token}',
-            'Content-Type': 'application/json'
-        }
+        response = self.post_request(query)
 
-        # Make the API request
-        response = requests.post(
-            'https://api.tibber.com/v1-beta/gql',
-            headers=headers,
-            json={'query': query},
-            timeout=20
-        )
-
-        if response.status_code==200:
+        if response is not None and response.status_code==200:
             # Parse the response
             data = json.loads(response.text)
 
@@ -176,6 +164,33 @@ class Tibber:
             self.price_time = datetime.now()-timedelta(days=2) # old!!
             return False
 
+    def post_request(self, query):
+        # Create the header
+        headers = {
+            'Authorization': f'Bearer {self.token}',
+            'Content-Type': 'application/json'
+        }
+        response = None # pre-fill in the case of exception
+
+        # Make the API request
+        try:
+            response = requests.post(
+                'https://api.tibber.com/v1-beta/gql',
+                headers=headers,
+                json={'query': query},
+                timeout=20
+            )
+        except requests.exceptions.HTTPError as http_err:
+            logger.error(f"HTTP error occurred: {http_err}")
+        except requests.exceptions.ConnectionError as conn_err:
+            logger.error(f"Connection error occurred: {conn_err}")
+        except requests.exceptions.Timeout as timeout_err:
+            logger.error(f"Timeout error occurred: {timeout_err}")
+        except requests.exceptions.RequestException as req_err:
+            logger.error(f"Request exception occurred: {req_err}")
+
+        return response
+
 
     def send_push_notification(self, title, message, screen_to_open):
         # Define the GraphQL mutation
@@ -192,23 +207,13 @@ class Tibber:
         }}
         """
 
-        # Create headers
-        headers = {
-            'Authorization': f'Bearer {self.token}',
-            'Content-Type': 'application/json'
-        }
-
-        # Make the API request
-        response = requests.post(
-            'https://api.tibber.com/v1-beta/gql',
-            headers=headers,
-            json={'query': mutation},
-            timeout=10
-        )
-
-        # Parse and return the response
-        data = json.loads(response.text)
-        return data['data']['sendPushNotification']
+        response = self.post_request(mutation)
+        if response is not None:
+            # Parse and return the response
+            data = json.loads(response.text)
+            return data['data']['sendPushNotification']
+        else:
+            return None
 
 
     def cheapest_charging_time(self, _current_soc, _target_soc, capacity_kWh=77, max_power_kW=11):
