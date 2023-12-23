@@ -7,7 +7,7 @@ from lib.tibber import Tibber
 from datetime import datetime, timedelta
 from lib.logger import Logger
 import logging
-logger = Logger(logging.INFO, "tibber.log")
+logger = Logger(logging.DEBUG, "tibber.log")
 
 from lib.tibber.tibber import tibber_time_to_datetime
 from lib.measurementlist import MeasurementList

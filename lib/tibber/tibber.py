@@ -254,10 +254,12 @@ class Tibber:
 
             # Check if end time exceeds the maximum time in the dictionary
             if i == len(sorted_keys) - 1 or end_time > sorted_keys[-1]:
+                logger.info(f"Amount of remaining time shards not sufficient: Last time interval: {sorted_keys[-1]}")
                 break  # Stop if the remaining time intervals are not sufficient
 
             # Check, if charging after next morning
             if end_time > latest_end:
+                logger.info(f"Charging would not be finished until {target_hour} h")
                 break  # Stop if end would be too late
 
             # Sum values within the time interval
@@ -268,8 +270,10 @@ class Tibber:
                 min_interval_sum = interval_sum
                 min_interval_start = start_time
 
-        # Example output
-        logger.debug(f"Start time of the minimal interval: {min_interval_start}")
+        if min_interval_start is None:
+            logger.error("No interval could be found")
+        else:
+            logger.debug(f"Start time of the minimal interval: {min_interval_start}")
 
         return min_interval_start
 

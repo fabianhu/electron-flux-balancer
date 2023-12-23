@@ -69,7 +69,7 @@ class TaskController:
             logger.log(f"Watchdog activated for task {name}.")
             task_data = self.tasks[name]
             if self.is_task_running(name): # check if task is still running
-                logger.log(f"Task {name} is still running and the timeout of {self.tasks[name]['watchdog_timeout']}s is over")
+                logger.error(f"Task {name} is still running and the timeout of {self.tasks[name]['watchdog_timeout']}s is over")
                 # fixme we did not kill it!
                 raise Exception(f"Task {name} is hanging")
             else:
