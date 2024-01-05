@@ -10,11 +10,13 @@ import time
 import imagelogger
 from config import tasmota_ips, tasmota_meter_ip
 
+# fixme Exception: Task tasmota is hanging
+
 
 lastImageTime = time.time()
 class Tasmotas:
     def __init__(self):
-        logger.log("Start Tasmota client")
+        logger.info("Start Tasmota client")
 
         self.iterator = 0
 

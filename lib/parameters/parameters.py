@@ -73,11 +73,14 @@ class ParameterServer:
         self.host = host
         self.port = port
 
+    def add_parameter(self, _name:str, _min:float, _max:float, _unit:str, _type:str, _step:float, _value ):
+        self.central_parameters[_name] = {'min': _min, 'max': _max, 'unit': _unit, 'type': _type, 'step': _step, 'value': _value}
+
     def run_server(self):
         self.app.run(host=self.host, port=self.port)
 
 
-    def index(self):
+    def index(self):  # the html representation
         if request.method == 'POST':
             print("post")
             for key, param in self.central_parameters.items():

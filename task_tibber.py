@@ -50,21 +50,21 @@ def do_tibber_to_influx():
         else:
             logger.error("Tibber data could not be obtained")
 
-charge_start_dt = None
+charge_start_plan_dt = None
 is_battery_planning_init = True
 
-def check_battery(_house_soc):
+def check_battery(_house_soc):  # fixme this has to go to sungrow or main.
     global myTibber
-    global charge_start_dt
+    global charge_start_plan_dt
     global is_battery_planning_init
 
     if _house_soc is None: return None
 
-    PLANNING_SCHEDULE_HOUR = 21
+    PLANNING_SCHEDULE_HOURS = [21, 2]
     LOOK_HOURS_FORWARD = 12 # how far to plan the next charge
     LOOK_HOURS_SPREAD = LOOK_HOURS_FORWARD + 6 # how far to look for the spread e.g. 21 + 12 = 9 +6 = 15 h
     SPREAD_FOR_CHARGE = 0.065
-    SOC_TARGET = 50
+    SOC_TARGET = 60
 
     capacity_kWh = 10
     max_power_kW = 5
@@ -73,7 +73,7 @@ def check_battery(_house_soc):
     current_time = datetime.now(timezone)
 
     # we plan at start of hour PLANNING_SCHEDULE_HOUR
-    if current_time.minute == 0 and current_time.minute == PLANNING_SCHEDULE_HOUR or is_battery_planning_init:  # avoid to do twice at 30s interval (but nevermind, should not bother)
+    if current_time.minute == 0 and current_time.hour in PLANNING_SCHEDULE_HOURS or is_battery_planning_init:  # avoid to do twice at 30s interval (but nevermind, should not bother)
         # calculate the best charging time
         is_battery_planning_init = False
 
@@ -89,35 +89,34 @@ def check_battery(_house_soc):
             logger.info(f"Price spread in the next {LOOK_HOURS_SPREAD} hours: {spread}")
             if spread > SPREAD_FOR_CHARGE and _house_soc < SOC_TARGET:
                 # set start time of planned charge
-                charge_start_dt = myTibber.cheapest_charging_time(_house_soc, SOC_TARGET, capacity_kWh, max_power_kW)
-                logger.info(f"Ok, it may be useful to charge the batt at {charge_start_dt}")
+                charge_start_plan_dt = myTibber.cheapest_charging_time(_house_soc, SOC_TARGET, capacity_kWh, max_power_kW)
+                logger.info(f"Ok, it may be useful to charge the batt at {charge_start_plan_dt}")
             else:
-                charge_start_dt = None
+                charge_start_plan_dt = None
         else:
             logger.error(f"No prices available in the next {LOOK_HOURS_SPREAD} hours.")
-            charge_start_dt = None
+            charge_start_plan_dt = None
 
-    if charge_start_dt is None:
+    if charge_start_plan_dt is None:
         return None
 
     #safety timer
     if 5 < current_time.hour < 21:
-        logger.debug("outside of business hours")
-        return None
+        logger.warning("Tibber based house batt charge outside of business hours")
 
-    # Calculate required energy to charge to 100%
-    required_kWh = (100 - _house_soc) / 100 * capacity_kWh
+    # Calculate required energy to charge
+    required_kWh = (100 - _house_soc) / 100 * capacity_kWh * 1.10
 
     # Calculate the expected end time based on current charge percent
     hours_required = required_kWh / max_power_kW
-    calculated_end_time = charge_start_dt + timedelta(hours=hours_required)
+    calculated_end_time = charge_start_plan_dt + timedelta(hours=hours_required)
 
     # If current time is near the ideal start time and we're not already charging, start charging
-    if calculated_end_time >= current_time >= charge_start_dt and _house_soc < SOC_TARGET:
+    if calculated_end_time >= current_time >= charge_start_plan_dt and _house_soc < SOC_TARGET:
         return max_power_kW*1000
     else:
         # Stop the charging process
-        charge_start_dt = None
+        charge_start_plan_dt = None
         return None
 
 

@@ -1,18 +1,33 @@
+import datetime
 import logging
 import inspect
 
 class Logger:
     def __init__(self, log_level=logging.ERROR, log_path='log.log'):
+        """
+        Initializes a Logger object for module-specific logging.
+        This method configures a logger with a file handler, suitable for logging messages from the calling module. The logger
+        captures all messages (level DEBUG), while the file handler records messages based on `log_level`.
+        The logger's name is automatically set to the calling module's name, allowing distinct log outputs for different modules.
+        Log messages are formatted to include timestamp, logger name, level, and message.
+
+        Parameters:
+        - log_level (logging.Level, optional): Minimum level of log messages to be recorded. Defaults to logging.ERROR.
+        - log_path (str, optional): File path for the log output. Defaults to 'log.log'.
+
+        Note:
+        - The logger level and file handler level are independent; the file handler may filter out lower-severity messages.
+        """
+
         # Retrieve the caller's module name using inspect
-        #caller_frame = inspect.stack()[1]
-        #module_name = inspect.getmodule(caller_frame[0]).__name__
         caller_frame = inspect.currentframe().f_back
         module_name = caller_frame.f_globals['__name__']
+
+        self.log_handler = logging.FileHandler(log_path)
 
         self.logger = logging.getLogger(module_name)
         self.logger.setLevel(logging.DEBUG)  # Set to the lowest level to capture all messages by default
 
-        self.log_handler = logging.FileHandler(log_path)
         self.log_handler.setLevel(log_level)
 
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -20,15 +35,8 @@ class Logger:
 
         self.logger.addHandler(self.log_handler)
 
-    def get_logger(self, module_name, log_level=logging.ERROR):
-        module_logger = logging.getLogger(module_name)
-        module_logger.setLevel(log_level)
-        module_logger.propagate = False  # Prevent logs from propagating up the hierarchy
-
-        if not any(isinstance(handler, logging.FileHandler) for handler in module_logger.handlers):
-            module_logger.addHandler(self.log_handler)  # Add the file handler if not already present
-
-        return module_logger
+        self.logint(f"Logger created from {module_name} logging to {log_path}")
+        self.logger.info("############### START ############################################")
 
     def debug(self, message):
         self.logger.debug(message)
@@ -48,6 +56,9 @@ class Logger:
     def critical(self, message):
         self.logger.critical(message)
 
+    @staticmethod
+    def logint(message):
+        with open("logger_internal.log", "a") as f: f.write(f"{datetime.datetime.now()} {message}\n")
 
 
 

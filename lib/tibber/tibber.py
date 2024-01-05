@@ -125,22 +125,45 @@ class Tibber:
             data = json.loads(response.text)
 
             # Extract current and tomorrow's price
-            current_price = data['data']['viewer']['homes'][0]['currentSubscription']['priceInfo']['current']['total']
-            prices_today = data['data']['viewer']['homes'][0]['currentSubscription']['priceInfo']['today']
-            prices_tomorrow = data['data']['viewer']['homes'][0]['currentSubscription']['priceInfo']['tomorrow']
+            try:
+                current_price = data['data']['viewer']['homes'][0]['currentSubscription']['priceInfo']['current']['total']
+            except (KeyError, IndexError) as e:
+                current_price = None
+                logger.error(f"No current price exception {e}")
+                self.prices = None
+                self.price_time = datetime.now() - timedelta(days=2)  # old!!
+                return False
+
+            try:
+                prices_today = data['data']['viewer']['homes'][0]['currentSubscription']['priceInfo']['today']
+            except (KeyError, IndexError) as e:
+                current_price = None
+                logger.error(f"No prices today exception {e}")
+                self.prices = None
+                self.price_time = datetime.now() - timedelta(days=2)  # old!!
+                return False
+
+            try:
+                prices_tomorrow = data['data']['viewer']['homes'][0]['currentSubscription']['priceInfo']['tomorrow']
+            except (KeyError, IndexError) as e:
+                current_price = None
+                logger.error(f"No prices tomorrow exception {e}")
+                self.prices = None
+                self.price_time = datetime.now() - timedelta(days=2)  # old!!
+                return False
 
             '''print(f"Current Price: {current_price}")
-
-            # Loop through and display tomorrow's prices
-            print("Today's Prices:")
-            for price in prices_today:
-                dt = tibber_time_to_datetime(price['startsAt'])
-                print(f"Starts At: {dt}, Total: {price['total']}")
-
-            print("Tomorrow's Prices:")
-            for price in prices_tomorrow:
-                dt = tibber_time_to_datetime(price['startsAt'])
-                print(f"Starts At: {dt}, Total: {price['total']}")'''
+            
+                        # Loop through and display tomorrow's prices
+                        print("Today's Prices:")
+                        for price in prices_today:
+                            dt = tibber_time_to_datetime(price['startsAt'])
+                            print(f"Starts At: {dt}, Total: {price['total']}")
+            
+                        print("Tomorrow's Prices:")
+                        for price in prices_tomorrow:
+                            dt = tibber_time_to_datetime(price['startsAt'])
+                            print(f"Starts At: {dt}, Total: {price['total']}")'''
 
             # If prices for tomorrow are None, replace them with today's maximum prices
             if prices_tomorrow is None or prices_tomorrow == []:
@@ -163,6 +186,7 @@ class Tibber:
             self.prices = None
             self.price_time = datetime.now()-timedelta(days=2) # old!!
             return False
+
 
     def post_request(self, query):
         # Create the header

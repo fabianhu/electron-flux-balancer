@@ -32,7 +32,6 @@ import logging
 
 import config
 import modbus
-import task_tibber
 import tesla_interface
 import lib.tesla_api.tesla_api_2024
 import lib.tibber
@@ -106,16 +105,11 @@ class ElectronFluxBalancer:
         self.myTesla = tesla_interface.TeslaCar(config.tesla_vin, lib.tesla_api.tesla_api_2024.TeslaAPI())
 
         # timing stuff
-        #self.last_car_update = time.time()
-        # self.last_car_charge_update = time.time()
         self.last_car_charge_current_sync = time.time()
-        #self.last_heater_update = time.time()
-        #self.last_tasmota_update = time.time()
 
         self.EMERGENCY_HEATER_OFF = False
 
         self.sg = sungrow.SungrowSH(sungrow_ip, 502)
-
 
         RS485_bus = modbus.Bus("/dev/ttyUSB0")
         self.temperatures_heating = modbus.Nt18b07TemperatureIn(RS485_bus, 1)
@@ -128,16 +122,12 @@ class ElectronFluxBalancer:
         self.heatpower = 0
 
         self.car_charge_amp = 0  #fixme move to Tesla!
-        self.car_charging_phases = 3 #fixme move to Tesla!
 
         self.last_tibber_schedule = datetime.now()-timedelta(days=2) # set to the past
 
         self.tas = tasmota.Tasmotas()
 
         self.dtu = openDTU.OpenDTU(openDTU_ip)
-
-        logger.info("Start ####################################################################")
-        logger.log("Start ####################################################################")
 
         taskctl = lib.intervaltask.TaskController()
         taskctl.add_task("tesla", self.do_car_update, 5*60,30)
@@ -190,6 +180,17 @@ class ElectronFluxBalancer:
     def do_sungrow_update(self):
         self.sg.update()  # get values from Wechselrichter
 
+        car_charge_power = self.myTesla.car_db_data.get_value_filtered('CAR_charge_W')
+        # battery_soc = self.sg.measurements.get_value('ELE Battery level')
+        # fixme batrecommend = task_tibber.check_battery(battery_soc)
+
+        # stop DISCHARGING the battery on high load from car and control battery at same point.
+        if self.myTesla.is_here_and_connected() and car_charge_power > 10000:  # fixme check this decision!!
+            self.sg.set_forced_charge(0)
+        else:
+            self.sg.set_forced_charge(None)
+
+
     def do_temperature_update(self): # every 2s
 
         self.temperatures_heating.get_temperatures()
@@ -199,9 +200,12 @@ class ElectronFluxBalancer:
 
         self.heating_measurements.update_value("Pi Temp", measure_pi_temp())
 
-        boiler_temp_sum = (self.heating_measurements.get_value("HEAT Boiler Oben") + self.heating_measurements.get_value("HEAT Boiler Unten") + self.heating_measurements.get_value(
-            "HEAT Boiler 3")) / 3.0
-        self.heating_measurements.update_value("HEAT Water prc", map_to_percentage(boiler_temp_sum, (35 + 30 + 25) / 3.0, temp_setpoint))
+        try:
+            boiler_temp_sum = (self.heating_measurements.get_value("HEAT Boiler Oben") + self.heating_measurements.get_value("HEAT Boiler Unten") + self.heating_measurements.get_value(
+                "HEAT Boiler 3")) / 3.0
+            self.heating_measurements.update_value("HEAT Water prc", map_to_percentage(boiler_temp_sum, (35 + 30 + 25) / 3.0, temp_setpoint))
+        except TypeError:  # catch exception if value is None ! (RTU init error)
+            logger.error("Water heater values not present.")
 
         # prepare values:
         boiler_temp_bot = self.heating_measurements.get_value('HEAT Boiler Unten')
@@ -247,31 +251,19 @@ class ElectronFluxBalancer:
         export_power = self.sg.measurements.get_value_filtered('ELE Export power')
         battery_power = self.sg.measurements.get_value_filtered('ELE Battery power c')
         battery_soc = self.sg.measurements.get_value('ELE Battery level')
-        car_charge_power = self.myTesla.car_db_data.get_value_filtered('CAR_charge_W')
-
-        batrecommend = task_tibber.check_battery(battery_soc)
-
-        # stop DISCHARGING the battery on high load from car and control battery at same point.
-        if self.myTesla.is_here_and_connected() and car_charge_power > 10000:
-            if batrecommend is None:
-                self.sg.set_forced_charge(0)
-            else:
-                self.sg.set_forced_charge(batrecommend)
-        else:
-            self.sg.set_forced_charge(batrecommend)
 
 
         # ready for solar overflow charging
-        if self.myTesla.is_here_and_connected() and not self.stop_tesla and not self.myTesla.current_request == 16 and not (
+        if self.myTesla.is_here_and_connected() and not self.stop_tesla and not self.myTesla.last_current_request == 16 and not (
                 export_power is None or
                 battery_power is None or
                 battery_soc is None
         ):
             # avoid charging with wrong value for too long
             # actual_set_charger_W = self.myTesla.charge_actual_W
-            if self.myTesla.current_actual > self.car_charge_amp and time.time() - self.last_car_charge_current_sync > 6 * 60:
-                logger.info(f"CAR charge current sync: was {self.car_charge_amp}, now {self.myTesla.current_actual}")
-                self.car_charge_amp = self.myTesla.current_actual  # fixme at least one should not exist
+            if self.myTesla.last_current_actual > self.car_charge_amp and time.time() - self.last_car_charge_current_sync > 6 * 60:
+                logger.info(f"CAR charge current sync: was {self.car_charge_amp}, now {self.myTesla.last_current_actual}")
+                self.car_charge_amp = self.myTesla.last_current_actual  # fixme at least one should not exist
                 self.last_car_charge_current_sync = time.time()
 
             if battery_soc > 30 and battery_power > -4000 and export_power > (-4500 if self.island_mode else -200):  # only allow charging over x% battery
@@ -288,12 +280,12 @@ class ElectronFluxBalancer:
 
                 if (export_power + battery_power + phantasy_power) > 750 and self.car_charge_amp < 15:
                     self.car_charge_amp += 1
-                    self.myTesla.set_charge(True, self.car_charge_amp * 230 * self.car_charging_phases)
+                    self.myTesla.set_charge(True, self.car_charge_amp)
                     # logger.info("Tesla inc", self.car_charge_amp)
 
                 if (export_power + battery_power + phantasy_power) < (-500 if self.island_mode else 0) and self.car_charge_amp > 0:
                     self.car_charge_amp -= 1
-                    self.myTesla.set_charge(True, self.car_charge_amp * 230 * self.car_charging_phases)
+                    self.myTesla.set_charge(True, self.car_charge_amp)
 
                     # logger.info("Tesla dec", self.car_charge_amp)
 
@@ -308,7 +300,7 @@ class ElectronFluxBalancer:
             self.car_charge_amp = 0  # Tesla not ready
             # logger.info("Car not ready")
 
-        self.heating_measurements.update_value("CAR Charge command", self.car_charge_amp * 230 * self.car_charging_phases)
+        self.heating_measurements.update_value("CAR Charge command", self.car_charge_amp * 230 * self.myTesla.last_charging_phases)
 
         if self.car_charge_amp > 0 or self.myTesla.is_charging:
             self.allowHeater = False
@@ -427,7 +419,10 @@ class ElectronFluxBalancer:
         TIBBER_CAR_CHARGE_CURRENT = 16 # todo parameter - must be the same value as the decision, if solar overflow charging!!
 
         now = datetime.now()
-        #fixme take into account the time of last connection?
+
+        if not self.myTesla.is_here_and_connected():
+            self.last_tibber_schedule = now - timedelta(days=2) # set to the past
+
         if now-self.last_tibber_schedule > timedelta(hours=2) and self.myTesla.is_here_and_connected():
             soc = self.myTesla.car_db_data.get_value("CAR_battery_level")
             soclim = self.myTesla.car_db_data.get_value("CAR_charge_limit_soc")
@@ -439,18 +434,18 @@ class ElectronFluxBalancer:
                 return
 
             if soc is None or soclim is None:
-                logger.error("Tibber Charge Plan no info from Tesla")
+                logger.error("Tibber Car Charge Plan no info from Tesla")
                 return
 
             mins = lib.tibber.tibber.datetime_to_minutes_after_midnight(myTibber.cheapest_charging_time(soc,soclim))
             if mins is None:
-                logger.error(f"Tibber we had no result from {myTibber.prices}")
+                logger.error(f"Tibber we had no result from {myTibber.prices} with SOC: {soc} and limit: {soclim}")
                 return
 
             self.myTesla.tesla_api.cmd_charge_set_schedule(self.myTesla.vin, mins)
 
             self.last_tibber_schedule = now
-            logger.debug(f"Tibbering {mins/60} h")
+            logger.info(f"Tibber Car charge plan is start at {mins/60} h")
 
 
 
@@ -458,6 +453,6 @@ class ElectronFluxBalancer:
 if __name__ == '__main__':
     efb = ElectronFluxBalancer()
     while True:
-        efb.do_temperature_update()
+        efb.do_temperature_update() # fixme we do not have a watchdog here!
         efb.do_heater_update()
         time.sleep(2)
