@@ -23,7 +23,7 @@ class SungrowSH:
         self.measurements = MeasurementList()
         self.client = ModbusTcpClient(ip, port, timeout=2, retries=1)
 
-        self.forced_charge = 0 # remember the last forced charge state to avoid sending all the time. init with zero, as this requires reactivation. 
+        self.forced_charge = 0 # remember the last forced charge state to avoid sending all the time. init with zero, as this requires reactivation to None in case of stuck forced charge.
 
         r = self.client.read_input_registers(address=4949, count=2 + 2 + 15 + 15, slave=1)  # 4968
         ver = ''.join(f' {reg:04x}' for reg in r.registers[0:4])

@@ -17,6 +17,8 @@ tesla_client_secret = "ta-secret.aaaaaaaaaaaaaaaa"  # only needed during registr
 # and store the pubkey at: https://your.domain/.well-known/appspecific/com.tesla.3p.public-key.pem
 tesla_redirect_domain = "your.domain"
 tesla_redirect_uri = "https://your.domain/and/stuff/"
+tesla_audience = "fleet-api.prd.eu.vn.cloud.tesla.com" # Europe
+#tesla_audience =  "fleet-api.prd.na.vn.cloud.tesla.com" # North America
 
 # for image-logger
 image_url = 'http://192.168.1.4/'

@@ -12,7 +12,7 @@
 /tesla-control/tesla-control
 /lib/tesla/.temp_token
 /lib/tesla_api/tesla-control/tesla-control
-/*.log
+*.log
 *__pycache__*
 *.temp_token
 *_version.txt

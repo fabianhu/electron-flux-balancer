@@ -413,7 +413,7 @@ class ElectronFluxBalancer:
         #logger.info(generated_power, battery_soc, battery_pwr, car_soc, car_pwr, heat_soc, heat_pwr, export_power, price)
 
 
-    def do_tesla_tibber_planning(self):
+    def do_tesla_tibber_planning(self):  # every 5 min directly after reading car data
         from task_tibber import myTibber
 
         TIBBER_CAR_CHARGE_CURRENT = 16 # todo parameter - must be the same value as the decision, if solar overflow charging!!
@@ -423,18 +423,23 @@ class ElectronFluxBalancer:
         if not self.myTesla.is_here_and_connected():
             self.last_tibber_schedule = now - timedelta(days=2) # set to the past
 
-        if now-self.last_tibber_schedule > timedelta(hours=2) and self.myTesla.is_here_and_connected():
+        if now-self.last_tibber_schedule > timedelta(hours=12) and self.myTesla.is_here_and_connected():  # we only plan, if car is here and connected and only once every 12h.
             soc = self.myTesla.car_db_data.get_value("CAR_battery_level")
             soclim = self.myTesla.car_db_data.get_value("CAR_charge_limit_soc")
             charge_current_request = self.myTesla.car_db_data.get_value("CAR_charge_current_request")
+            state = self.myTesla.car_db_data.get_value("CAR_charging_state")
+
+            if soc is None or soclim is None or state is None:
+                logger.error("Tibber Car Charge Plan no info from Tesla")
+                return
 
             if charge_current_request != TIBBER_CAR_CHARGE_CURRENT:
                 logger.info(f"Tibber charging cancelled due to requested {charge_current_request} A instead of {TIBBER_CAR_CHARGE_CURRENT} A.")
-                self.myTesla.tesla_api.cmd_charge_cancel_schedule(self.myTesla.vin)
+                # just leave it. self.myTesla.tesla_api.cmd_charge_cancel_schedule(self.myTesla.vin) # will immediately start
                 return
 
-            if soc is None or soclim is None:
-                logger.error("Tibber Car Charge Plan no info from Tesla")
+            if state != "Stopped":
+                logger.info(f"Tibber charging cancelled due to state being {state} instead of Stopped.")
                 return
 
             mins = lib.tibber.tibber.datetime_to_minutes_after_midnight(myTibber.cheapest_charging_time(soc,soclim))

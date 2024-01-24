@@ -7,7 +7,7 @@ logger = Logger(log_level=logging.DEBUG, log_path="tasks.log")
 
 import traceback
 
-# fixme think about multiprocessing
+# fixme think about multiprocessing - but: separate memory spaces, so we need clean inter-task comm.
 
 def thread_alert(func):
     """
@@ -92,7 +92,7 @@ class TaskController:
             logger.error(f"Watchdog activated for task {name}.")
             task_data = self.tasks[name]
             if self.is_task_running(name): # check if task is still running
-                logger.error(f"Task {name} is still running and the timeout of {self.tasks[name]['watchdog_timeout']}s is over")
+                logger.error(f"Task {name} is still running and the timeout of {self.tasks[name]['watchdog_timeout']}s is over - task data: {task_data}")
                 # fixme we did not kill it!
                 raise Exception(f"Task {name} is hanging with data: {task_data}")
             else:

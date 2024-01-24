@@ -263,7 +263,7 @@ class Tibber:
 
         # Calculate number of hours required to charge
         hours_required = required_kWh / max_power_kW
-        logger.debug(f"need to charge {required_kWh} kWh in {hours_required} h")
+        logger.info(f"need to charge {required_kWh} kWh in {hours_required} h")
         charging_time_interval = timedelta(hours=hours_required)
 
         # Find starting time for cheapest charge
@@ -283,7 +283,7 @@ class Tibber:
 
             # Check, if charging after next morning
             if end_time > latest_end:
-                logger.info(f"Charging would not be finished until {target_hour} h")
+                logger.info(f"Charging would not be finished until {target_hour} h - end: {end_time} latest:{latest_end} if next line found a time, there is no issue")
                 break  # Stop if end would be too late
 
             # Sum values within the time interval
@@ -297,7 +297,7 @@ class Tibber:
         if min_interval_start is None:
             logger.error("No interval could be found")
         else:
-            logger.debug(f"Start time of the minimal interval: {min_interval_start}")
+            logger.info(f"Start time of the minimal interval: {min_interval_start}")
 
         return min_interval_start
 
