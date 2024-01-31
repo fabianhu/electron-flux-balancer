@@ -7,18 +7,18 @@ sungrow_test_ip = '192.168.1.2' # whoever guesses, why this is there, should set
 
 openDTU_ip = "192.168.1.3"
 
-#tesla_login = 'your@tesla.account.com' # not needed with new API
 tesla_vin = 'LRWYAAAAAAA135456'
 tesla_client_id = "aaaaaaaaaaaa-bbbb-cccc-ddddddddddd"
 tesla_client_secret = "ta-secret.aaaaaaaaaaaaaaaa"  # only needed during registration, so does not ever need to be on the Pi!
 # put your key pair here:
-#/TeslaKeys/privatekey.pem
-#/TeslaKeys/publickey.pem
+#lib/tesla_api/TeslaKeys/privatekey.pem
+#lib/tesla_api/TeslaKeys/publickey.pem
 # and store the pubkey at: https://your.domain/.well-known/appspecific/com.tesla.3p.public-key.pem
-tesla_redirect_domain = "your.domain"
-tesla_redirect_uri = "https://your.domain/and/stuff/"
+tesla_redirect_domain = "your.domain"  # NO https:// !!!
+tesla_redirect_uri = "https://your.domain/and/stuff/"  # start with https:// and include a tailing '/'!
 tesla_audience = "fleet-api.prd.eu.vn.cloud.tesla.com" # Europe
 #tesla_audience =  "fleet-api.prd.na.vn.cloud.tesla.com" # North America
+tesla_scopes = "user_data vehicle_device_data vehicle_cmds vehicle_charging_cmds energy_device_data energy_cmds"  # match with your application access request
 
 # for image-logger
 image_url = 'http://192.168.1.4/'
