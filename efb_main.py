@@ -147,6 +147,7 @@ class ElectronFluxBalancer:
     def set_heater(self, watt):
         if self.EMERGENCY_HEATER_OFF or self.stop_heater:
             self.rel1.off(0)
+            self.heatpower = 0
             return
 
         watt = min(watt, 3000)
@@ -162,7 +163,7 @@ class ElectronFluxBalancer:
             self.rel1.off(2)
             self.heatpower = 2000
         elif 2500 < watt <= 3500:
-            self.rel1.on(0, timout)
+            self.rel1.on(0, timout) # both
             self.heatpower = 3000
         else:
             self.rel1.off(0)

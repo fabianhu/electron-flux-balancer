@@ -49,23 +49,45 @@ class ParameterServer:
         self.app = Flask(__name__)
         self.app.route('/', methods=['GET', 'POST'])(self.index)
         self.PARAMETERFILE = 'parameters.json'
-        self.PAGENAME = "ElectronFluxBalancer parameter interface"
+        self.PAGENAME = "ElectronFluxBalancer<br>parameter interface"
         self.central_parameters = {
-            'Charge car above house SOC': {'min': 10, 'max': 50, 'unit': '%', 'type': 'number', 'step': 1},
-            'Boiler setpoint': {'min': 10, 'max': 65, 'unit': '°C', 'type': 'number', 'step': 0.5},
-            'Charge from grid car below': {'min': 0.0, 'max': 0.6, 'unit': '€', 'type': 'number', 'step': 0.01},
-            'Enable grid charge': {'options': ['on', 'off'], 'unit': '', 'type': 'enum'}
+            'House Battery':{
+                'Control': {'options': ['on', 'off'], 'unit': '', 'type': 'enum', 'value': 'on'},
+                'Charge below': {'min': 0.0, 'max': 0.6, 'unit': '€', 'type': 'number', 'step': 0.01, 'value': 0.08},
+                'Charge limit': {'min': 0, 'max': 100, 'unit': '%', 'type': 'number', 'step': 1, 'value': 80},
+                #'Emergency SOC': {'min': 10, 'max': 99, 'unit': '%', 'type': 'number', 'step': 1, 'value': 10},
+            },
+            'Car Solar':{
+                'Control': {'options': ['on', 'off'], 'unit': '', 'type': 'enum', 'value': 'off'},
+                'charge above house SOC': {'min': 10, 'max': 99, 'unit': '%', 'type': 'number', 'step': 1, 'value': 99},
+            },
+            'Car Grid':{
+                'Control': {'options': ['on', 'off'], 'unit': '', 'type': 'enum', 'value': 'off'},
+                'charge below': {'min': 0.0, 'max': 0.6, 'unit': '€', 'type': 'number', 'step': 0.01, 'value': 0.10},
+                'Plan ahead': {'min': 0, 'max': 24, 'unit': 'h', 'type': 'number', 'step': 1, 'value': 8},
+                'Finish at': {'min': 0, 'max': 24, 'unit': 'h', 'type': 'number', 'step': 1, 'value': 8},
+            },
+            'Heat Boiler':{
+                'Control': {'options': ['on', 'off'], 'unit': '', 'type': 'enum'},
+                'Heat above house SOC': {'min': 10, 'max': 99, 'unit': '%', 'type': 'number', 'step': 1, 'value': 50},
+                'Setpoint': {'min': 45, 'max': 65, 'unit': '°C', 'type': 'number', 'step': 0.5, 'value': 50},
+            },
         }
 
         # Load values from file if it exists, otherwise use defaults
         try:
             with open(self.PARAMETERFILE, 'r') as f:
                 saved_values = json.load(f)
-            for key, param in self.central_parameters.items():
-                param['value'] = saved_values.get(key, param.get('value', None))
-        except FileNotFoundError:
-            for key, param in self.central_parameters.items():
-                param['value'] = param.get('value', None)
+            for group, parameters in self.central_parameters.items():
+                for key, param in parameters.items():
+                    if group in saved_values and key in saved_values[group]:
+                        param['value'] = saved_values[group][key]
+                    else:
+                        param['value'] = param.get('value', None)
+        except (FileNotFoundError, json.JSONDecodeError, KeyError, TypeError):
+            for group, parameters in self.central_parameters.items():
+                for key, param in parameters.items():
+                    param['value'] = param.get('value', None)
 
         self.server_thread = Thread(target=self.run_server)
 
@@ -82,31 +104,42 @@ class ParameterServer:
 
     def index(self):  # the html representation
         if request.method == 'POST':
-            print("post")
-            for key, param in self.central_parameters.items():
-                if param['type'] == 'number':
-                    param['value'] = float(request.form[key])
-                elif param['type'] == 'enum':
-                    param['value'] = request.form[key]
+            for group, parameters in self.central_parameters.items():
+                for key, param in parameters.items():
+                    if param is not None:
+                        if param.get('type') == 'number' and request.form[key] != '':
+                            param['value'] = float(request.form[key])
+                        elif param.get('type') == 'enum' and request.form[key] != '':
+                            param['value'] = request.form[key]
 
-            # Save only names and values to file
+            # Save to file
+            j = {}
+            for group, parameters in self.central_parameters.items():
+                j[group] = {}
+                for key, param in parameters.items():
+                    j[group][key] = param['value']
             with open(self.PARAMETERFILE, 'w') as f:
-                json.dump({key: param['value'] for key, param in self.central_parameters.items()}, f)
+                json.dump(j, f, indent=4 )
 
         html = f'<h1>{self.PAGENAME}</h1><form method="post"><table>'
-        for key, param in self.central_parameters.items():
-            html += '<tr>'
-            html += f'<td>{key}</td><td>'
-            if param['type'] == 'number':
-                step = param.get('step', 1)  # Use 1 as default step if not specified
-                html += f'<input type="number" name="{key}" value="{param["value"]}" min="{param["min"]}" max="{param["max"]}" step="{step}" />'
-            elif param['type'] == 'enum':
-                html += f'<select name="{key}">'
-                for option in param['options']:
-                    selected = 'selected' if option == param['value'] else ''
-                    html += f'<option value="{option}" {selected}>{option}</option>'
-                html += '</select>'
-            html += f'</td><td>{param["unit"]}</td></tr>'
+        for group, parameters in self.central_parameters.items():
+            html += f'<tr><td colspan="3"><strong>{group}</strong></td></tr>'  # Add group name as a separator
+            for key, param in parameters.items():
+                html += '<tr>'
+                html += f'<td>&nbsp; {key}</td><td>'
+                if param is not None:
+                    if param.get('type') == 'number':
+                        step = param.get('step', 1)  # Use 1 as default step if not specified
+                        html += f'<input type="number" name="{key}" value="{param.get("value",None)}" min="{param["min"]}" max="{param["max"]}" step="{step}" size="5" />'
+                    elif param['type'] == 'enum':
+                        html += f'<select name="{key}">'
+                        for option in param['options']:
+                            selected = 'selected' if option == param.get('value',None) else ''
+                            html += f'<option value="{option}" {selected}>{option}</option>'
+                        html += '</select>'
+                    html += f'</td><td>{param["unit"]}</td></tr>'
+                else:
+                    html += '</td><td></td></tr>'
         html += '</table><input type="submit" value="Submit"></form>'
 
         header = f"""<!DOCTYPE html>
@@ -128,11 +161,16 @@ class ParameterServer:
         # This is a basic way to stop the server. In a production environment, you might want a more robust solution.
         self.server_thread.join()
 
-    def get_parameter(self, parameter_name):
-        return self.central_parameters.get(parameter_name, {}).get('value', None)
+
+    def get_parameter(self, group_name, parameter_name):
+        return self.central_parameters.get(group_name, {}).get(parameter_name, {}).get('value', None)
 
     def get_parameter_names(self):
-        return list(self.central_parameters.keys())
+        parameter_names = []
+        for group, parameters in self.central_parameters.items():
+            for parameter_name in parameters.keys():
+                parameter_names.append(f"{group} - {parameter_name}")
+        return parameter_names
 
 
 if __name__ == '__main__':

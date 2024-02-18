@@ -17,7 +17,7 @@ from config import home
 from lib.tesla_api import tesla_api_2024
 
 logToFile = False
-APIVERSION = 71
+APIVERSION = 73
 
 
 # extract the value from a multi index
