@@ -6,7 +6,7 @@ import lib.intervaltask
 from pymodbus.client import ModbusTcpClient
 from lib.measurementlist import MeasurementList
 from lib.logger import Logger
-logger = Logger(log_level=logging.ERROR, log_path="sungrow.log")
+logger = Logger(log_level=logging.DEBUG, log_path="sungrow.log")
 
 def checked_multiply(a,b):
     if a is not None and b is not None:
@@ -23,7 +23,7 @@ class SungrowSH:
         self.measurements = MeasurementList()
         self.client = ModbusTcpClient(ip, port, timeout=2, retries=1)
 
-        self.forced_charge = 0 # remember the last forced charge state to avoid sending all the time. init with zero, as this requires reactivation to None in case of stuck forced charge.
+        self.forced_charge = 1 # remember the last forced charge state to avoid sending all the time. init with 1, as this requires reactivation to None in case of stuck forced charge and also requires sending on car charge stop .
 
         r = self.client.read_input_registers(address=4949, count=2 + 2 + 15 + 15, slave=1)  # 4968
         ver = ''.join(f' {reg:04x}' for reg in r.registers[0:4])
@@ -248,14 +248,16 @@ class SungrowSH:
                     set_registers = [0, 0xCC, 0]
                     _power = None
 
-                if set_registers != read_registers:
+                is_write_necessary = False
+                for i in range(3):
+                    if set_registers[i] != read_registers[i]:
+                        is_write_necessary = True
+
+                if is_write_necessary:
                     logger.info(log_info_txt)
                     self.client.write_registers(13049, set_registers, 1)
-
-                    ''' for i in range(3):
-                        if set_registers[i] != read_registers[i]:
-                            self.client.write_register(13049+i, set_registers[i] , 1)'''
                     self.forced_charge = _power
+
 
             except Exception as e:
                 logger.error(f'Modbus write error on set charge {type(e)}: {e}')
@@ -323,8 +325,8 @@ if __name__ == '__main__':
     #sg.update(_test=True)
     #sg.update(_test=True) # call twice to process all data!
 
-    #sg.set_forced_charge(None)
-    sg.set_soc_reserve(10)
+    sg.set_forced_charge(None)
+    #sg.set_soc_reserve(10)
 
     '''r= sg.client.read_holding_registers(13049,3,1)
     registers = r.registers

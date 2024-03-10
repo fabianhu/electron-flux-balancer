@@ -49,6 +49,7 @@ from datetime import datetime, timedelta
 from config import sungrow_ip
 from config import openDTU_ip
 from displayserver import push_displays
+from task_tibber import myTibber
 
 temp_setpoint = 60 # fixme do proper parameters using ParameterServer
 
@@ -121,7 +122,7 @@ class ElectronFluxBalancer:
 
         self.heatpower = 0
 
-        self.car_charge_amp = 0  #fixme move to Tesla!
+        self.car_charge_amp_command_integrator = 0
 
         self.last_tibber_schedule = datetime.now()-timedelta(days=2) # set to the past
 
@@ -178,16 +179,88 @@ class ElectronFluxBalancer:
         self.do_tesla_tibber_planning()
 
 
+    def do_car_charge(self):
+        # solar power overhang charge
+
+        # prepare values:
+        house_export_power = self.sg.measurements.get_value_filtered('ELE Export power')
+        house_battery_power = self.sg.measurements.get_value_filtered('ELE Battery power c')
+        house_battery_soc = self.sg.measurements.get_value('ELE Battery level')
+        phases = self.myTesla.CAR_charger_real_phases # We need this here!
+        CAR_charger_actual_current = self.myTesla.car_db_data.get_value('CAR_charger_actual_current')
+        CAR_charge_current_request = self.myTesla.car_db_data.get_value('CAR_charge_current_request')
+
+        # ready for solar overflow charging
+        if self.myTesla.is_here_and_connected() and not self.stop_tesla and not CAR_charge_current_request == 16 and not (
+                house_export_power is None or
+                house_battery_power is None or
+                house_battery_soc is None
+        ):
+            # avoid charging with wrong value for too long
+            # actual_set_charger_W = self.myTesla.charge_actual_W
+            if CAR_charger_actual_current > self.car_charge_amp_command_integrator and time.time() - self.last_car_charge_current_sync > 6 * 60:
+                logger.info(f"CAR charge current sync: was {self.car_charge_amp_command_integrator}, now {CAR_charger_actual_current}")
+                self.car_charge_amp_command_integrator = CAR_charger_actual_current
+                self.last_car_charge_current_sync = time.time()
+
+            if house_battery_soc > 30 and house_battery_power > -4000 and house_export_power > (-4500 if self.island_mode else -200):  # only allow charging over x% battery
+
+                if house_battery_soc < 95 or not self.island_mode:  # avoid idling around with nothing to do as long as house_export_power is limited to -50W
+                    phantasy_power = 0
+                elif 95 <= house_battery_soc <= 100:
+                    phantasy_power = 200 * (house_battery_soc - 95)  # 0..5
+                else:
+                    phantasy_power = 1000
+
+                if house_battery_soc < 80 and self.island_mode:
+                    phantasy_power = -750  # leave room for batt to charge - does not work at 500w charge power
+
+                if (house_export_power + house_battery_power + phantasy_power) > 750 and self.car_charge_amp_command_integrator < 15:
+                    self.car_charge_amp_command_integrator += 1
+                    self.myTesla.set_charge(True, self.car_charge_amp_command_integrator)
+                    # logger.info(f"Tesla inc {self.car_charge_amp_command_integrator}")
+
+                if (house_export_power + house_battery_power + phantasy_power) < (-500 if self.island_mode else 0) and self.car_charge_amp_command_integrator > 0:
+                    self.car_charge_amp_command_integrator -= 1
+                    self.myTesla.set_charge(True, self.car_charge_amp_command_integrator)
+                    # logger.info(f"Tesla dec {self.car_charge_amp_command_integrator}")
+
+            elif self.myTesla.is_charging: # do not charge anymore (conditions not met)
+                self.myTesla.set_charge(False, 0)
+                self.car_charge_amp_command_integrator = 0
+                logger.info("Charging end - too much power draw or batt empty")
+            else:
+                self.car_charge_amp_command_integrator = 0
+                logger.info("too much power draw or batt empty")
+        else:
+            self.car_charge_amp_command_integrator = 0  # Tesla not ready
+            logger.info("Car not ready")
+
+        # send to DB what we actually commanded tight now.
+        self.heating_measurements.update_value("CAR Charge command", self.car_charge_amp_command_integrator * 230 * phases)
+
+        if self.car_charge_amp_command_integrator > 0 or self.myTesla.is_charging:
+            self.allowHeater = False
+        else:
+            self.allowHeater = True
+
+
     def do_sungrow_update(self):
         self.sg.update()  # get values from Wechselrichter
 
-        car_charge_power = self.myTesla.car_db_data.get_value_filtered('CAR_charge_W')
+        car_charge_power = self.myTesla.car_db_data.get_value('CAR_charge_W')
+
         # battery_soc = self.sg.measurements.get_value('ELE Battery level')
         # fixme batrecommend = task_tibber.check_battery(battery_soc)
 
+        is_here_and_connected = self.myTesla.is_here_and_connected()
+
+        # logger.debug(f"Car charge power {car_charge_power} W and is here: {is_here_and_connected}")
+
         # stop DISCHARGING the battery on high load from car and control battery at same point.
-        if self.myTesla.is_here_and_connected() and car_charge_power > 10000:  # fixme check this decision!!
+        if  is_here_and_connected and car_charge_power > 10000:  # fixme check this decision!!
             self.sg.set_forced_charge(0)
+            # logger.debug(f"Car charge power {car_charge_power} W -> House batt off")
         else:
             self.sg.set_forced_charge(None)
 
@@ -195,6 +268,8 @@ class ElectronFluxBalancer:
     def do_temperature_update(self): # every 2s
 
         self.temperatures_heating.get_temperatures()
+
+        # update all temperature values
         for i in self.heating_measurements.get_name_list():
             if self.heating_measurements.get_source(i) is not None:
                 self.heating_measurements.update_value(i, self.temperatures_heating.values[self.heating_measurements.get_source(i)])
@@ -202,20 +277,15 @@ class ElectronFluxBalancer:
         self.heating_measurements.update_value("Pi Temp", measure_pi_temp())
 
         try:
-            boiler_temp_sum = (self.heating_measurements.get_value("HEAT Boiler Oben") + self.heating_measurements.get_value("HEAT Boiler Unten") + self.heating_measurements.get_value(
-                "HEAT Boiler 3")) / 3.0
-            self.heating_measurements.update_value("HEAT Water prc", map_to_percentage(boiler_temp_sum, (35 + 30 + 25) / 3.0, temp_setpoint))
+            temp_top_prc = map_to_percentage(self.heating_measurements.get_value("HEAT Boiler Oben"),50,temp_setpoint)
+            temp_mid_prc = map_to_percentage(self.heating_measurements.get_value("HEAT Boiler 3"), 25, temp_setpoint)
+            temp_low_prc = map_to_percentage(self.heating_measurements.get_value("HEAT Boiler Unten"), 20, temp_setpoint)
+            temp_prc = (temp_top_prc+temp_mid_prc+temp_low_prc)/3
+
+            self.heating_measurements.update_value("HEAT Water prc", temp_prc)
         except TypeError:  # catch exception if value is None ! (RTU init error)
+            self.heating_measurements.update_value("HEAT Water prc", None)
             logger.error("Water heater values not present.")
-
-        # prepare values:
-        boiler_temp_bot = self.heating_measurements.get_value('HEAT Boiler Unten')
-        over_temperature = self.heating_measurements.get_value('HEAT spare')  # magnetic extra sensor at cabinet outer surface
-
-        if over_temperature > 60 or boiler_temp_bot > 63 or self.EMERGENCY_HEATER_OFF:
-            self.rel1.off(1)  # emergency switch off
-            logger.log("HEATER EMERGENCY OFF")
-            self.EMERGENCY_HEATER_OFF = True
 
         # write time of day as a separate variable
         # Get current date and time
@@ -245,69 +315,6 @@ class ElectronFluxBalancer:
         self.heating_measurements.write_measurements()
 
 
-    def do_car_charge(self):
-        # solar power overhang charge
-
-        # prepare values:
-        export_power = self.sg.measurements.get_value_filtered('ELE Export power')
-        battery_power = self.sg.measurements.get_value_filtered('ELE Battery power c')
-        battery_soc = self.sg.measurements.get_value('ELE Battery level')
-
-
-        # ready for solar overflow charging
-        if self.myTesla.is_here_and_connected() and not self.stop_tesla and not self.myTesla.last_current_request == 16 and not (
-                export_power is None or
-                battery_power is None or
-                battery_soc is None
-        ):
-            # avoid charging with wrong value for too long
-            # actual_set_charger_W = self.myTesla.charge_actual_W
-            if self.myTesla.last_current_actual > self.car_charge_amp and time.time() - self.last_car_charge_current_sync > 6 * 60:
-                logger.info(f"CAR charge current sync: was {self.car_charge_amp}, now {self.myTesla.last_current_actual}")
-                self.car_charge_amp = self.myTesla.last_current_actual  # fixme at least one should not exist
-                self.last_car_charge_current_sync = time.time()
-
-            if battery_soc > 30 and battery_power > -4000 and export_power > (-4500 if self.island_mode else -200):  # only allow charging over x% battery
-
-                if battery_soc < 95 or not self.island_mode:  # avoid idling around with nothing to do as long as export_power is limited to -50W
-                    phantasy_power = 0
-                elif 95 <= battery_soc <= 100:
-                    phantasy_power = 200 * (battery_soc - 95)  # 0..5
-                else:
-                    phantasy_power = 1000
-
-                if battery_soc < 80 and self.island_mode:
-                    phantasy_power = -750  # leave room for batt to charge - does not work at 500w charge power
-
-                if (export_power + battery_power + phantasy_power) > 750 and self.car_charge_amp < 15:
-                    self.car_charge_amp += 1
-                    self.myTesla.set_charge(True, self.car_charge_amp)
-                    # logger.info("Tesla inc", self.car_charge_amp)
-
-                if (export_power + battery_power + phantasy_power) < (-500 if self.island_mode else 0) and self.car_charge_amp > 0:
-                    self.car_charge_amp -= 1
-                    self.myTesla.set_charge(True, self.car_charge_amp)
-
-                    # logger.info("Tesla dec", self.car_charge_amp)
-
-            elif self.myTesla.is_charging: # do not charge anymore (conditions not met)
-                self.myTesla.set_charge(False, 0)
-                self.car_charge_amp = 0
-                logger.info("Charging end - too much power draw or batt empty")
-            else:
-                self.car_charge_amp = 0
-                # logger.info("too much power draw or batt empty")
-        else:
-            self.car_charge_amp = 0  # Tesla not ready
-            # logger.info("Car not ready")
-
-        self.heating_measurements.update_value("CAR Charge command", self.car_charge_amp * 230 * self.myTesla.last_charging_phases)
-
-        if self.car_charge_amp > 0 or self.myTesla.is_charging:
-            self.allowHeater = False
-        else:
-            self.allowHeater = True
-
     def do_heater_update(self):
         #  every 10s
 
@@ -335,39 +342,63 @@ class ElectronFluxBalancer:
                 boiler_temp_bot is None or
                 over_temperature is None
         ):
-            logger.log(f"We have None values! {export_power}, {battery_power}, {generated_power}, {battery_soc}, {boiler_temp_bot}, {over_temperature}")
-            hw = 0
+            logger.log(f"We have None values! exp{export_power}, bat{battery_power}, gen{generated_power}, soc{battery_soc}, boi{boiler_temp_bot}, ovt{over_temperature}")
+
+            self.rel1.off(1)  # emergency switch off
+            logger.error("Heater off due to None values!")
+
+            return # do not continue
         else:
             # ok, we try to control it
             hw = self.heatpower  # the remembered value
-            '''
-            generated_power is only checked for 50W, because Nulleinspeisung
-            '''
-            if (
-                    (self.island_mode and
-                     ((battery_soc > 90 and battery_power > 1000) or
-                      (battery_soc > 95 and generated_power > 50)) and export_power > -500)
-                    or
-                    not self.island_mode and
-                    (export_power > 1100)
-            ) and \
-                    boiler_temp_bot < temp_setpoint and \
-                    self.allowHeater and \
-                    over_temperature < 57 and \
-                    not self.stop_heater:  # and ep > -100: # and bp > xx
-                hw += 1000
-                # logger.info("inc heater", self.allowHeater, export_power, boiler_temp_bot, battery_soc, hw)
-            elif export_power < (-1000 if self.island_mode else 0) or boiler_temp_bot > temp_setpoint or battery_power < -1000:
-                hw -= 1000
-                # logger.info("dec heater", self.allowHeater, export_power, boiler_temp_bot, battery_soc, hw)
 
-            # no discussion, if something is off, we switch off.
-            if self.island_mode and (export_power < -3000 or battery_power < -2000 or battery_soc < 80 or boiler_temp_bot > temp_setpoint + 3):
-                hw = 0
-                # logger.info("disable heater in island mode", self.allowHeater, export_power, boiler_temp_bot, battery_soc)
-            if not self.island_mode and (export_power + battery_power < -1000 or battery_soc < 95 or boiler_temp_bot > temp_setpoint + 3):
-                hw = 0
-                # logger.info("disable heater", self.allowHeater, export_power, boiler_temp_bot, battery_soc)
+            if self.island_mode: # todo par
+                if(
+                        ((battery_soc > 90 and battery_power > 1000) or (battery_soc > 95 and generated_power > 50))
+                        and export_power > -500  # generated_power is only checked for 50W, because Nulleinspeisung
+                        and boiler_temp_bot < temp_setpoint
+                        and self.allowHeater
+                        and over_temperature < 57
+                        and not self.stop_heater
+                        and hw < 3000
+                ):
+                    hw += 1000
+                    # logger.info("inc heater", self.allowHeater, export_power, boiler_temp_bot, battery_soc, hw)
+                elif export_power < -1000 or boiler_temp_bot > temp_setpoint or battery_power < -1000:
+                    hw -= 1000
+                    # logger.info("dec heater", self.allowHeater, export_power, boiler_temp_bot, battery_soc, hw)
+
+                # no discussion, if something is off, we switch off.
+                if export_power < -3000 or battery_power < -2000 or battery_soc < 80 or boiler_temp_bot > temp_setpoint + 3:
+                    hw = 0
+                    # logger.info("disable heater in island mode", self.allowHeater, export_power, boiler_temp_bot, battery_soc)
+
+            else:  # not island mode
+                if (
+                        export_power > 1100
+                        and boiler_temp_bot < temp_setpoint
+                        and self.allowHeater
+                        and not self.stop_heater
+                        and hw < 3000
+                ):
+                    hw += 1000
+                    # logger.info("inc heater", self.allowHeater, export_power, boiler_temp_bot, battery_soc, hw)
+                elif export_power <  0 or boiler_temp_bot > temp_setpoint or battery_power < -1000:
+                    hw -= 1000
+                    # logger.info("dec heater", self.allowHeater, export_power, boiler_temp_bot, battery_soc, hw)
+
+                # no discussion, if something is off, we switch off.
+                if (
+                        (export_power + battery_power < -2000 or battery_soc < 95 or boiler_temp_bot > temp_setpoint + 3)
+                        and hw > 0
+                ):
+                    hw = 0
+                    logger.debug(f"disable heater, ht{self.allowHeater}, exp{export_power}, boi{boiler_temp_bot}, soc{battery_soc}")
+
+        if over_temperature > 60 or boiler_temp_bot > 65 or self.EMERGENCY_HEATER_OFF:
+            hw = 0
+            logger.error(f"EMERGENCY heater, emo{self.EMERGENCY_HEATER_OFF}, exp{export_power}, boi{boiler_temp_bot}, ovt{over_temperature}")
+
         self.set_heater(hw)
 
 
@@ -388,36 +419,32 @@ class ElectronFluxBalancer:
     def do_display_update(self):
         generated_power_S = self.sg.measurements.get_value_filtered('ELE String S power')
         generated_power_N = self.sg.measurements.get_value_filtered('ELE String N power')
-        generated_power_gar_S = self.dtu.dat.get_value('HOY Garage S Power')
-        generated_power_gar_N = self.dtu.dat.get_value('HOY Garage N Power')
+        generated_power_gar_S = self.dtu.dat.get_value_filtered('HOY Garage S Power')
+        generated_power_gar_N = self.dtu.dat.get_value_filtered('HOY Garage N Power')
         if generated_power_S is None: generated_power_S = 0
         if generated_power_N is None: generated_power_N = 0
         if generated_power_gar_S is None: generated_power_gar_S = 0
         if generated_power_gar_N is None: generated_power_gar_N = 0
 
-        generated_power = map_sym_to_percentage(generated_power_S + generated_power_N + generated_power_gar_S + generated_power_gar_N,8000)
-        battery_soc = self.sg.measurements.get_value_filtered('ELE Battery level')
-        battery_pwr = map_sym_to_percentage(self.sg.measurements.get_value('ELE Battery power c'),5000)
-        car_soc = self.myTesla.car_db_data.get_value_filtered('CAR_battery_level')
-        carpwr_W = self.heating_measurements.get_value_filtered('CAR Charge command')
-        if carpwr_W == 0:
-            carpwr_W = self.myTesla.car_db_data.get_value_filtered('CAR_charge_W')
+        generated_power = generated_power_S + generated_power_N + generated_power_gar_S + generated_power_gar_N
+        battery_soc = self.sg.measurements.get_value('ELE Battery level')
+        battery_pwr = self.sg.measurements.get_value_filtered('ELE Battery power c')
+        car_soc = self.myTesla.car_db_data.get_value('CAR_battery_level')
+        carpwr_W = self.myTesla.car_db_data.get_value('CAR_charge_W')
 
-        car_pwr = map_sym_to_percentage(carpwr_W,11000)
-        heat_soc = self.heating_measurements.get_value_filtered('HEAT Water prc')
-        heat_pwr = map_sym_to_percentage(self.heating_measurements.get_value_filtered('HEAT power command'),3000)
-        export_power = map_sym_to_percentage(self.sg.measurements.get_value_filtered('ELE Export power'),5000)
+        heat_soc = self.heating_measurements.get_value('HEAT Water prc')
+        heat_pwr = self.heating_measurements.get_value('HEAT power command')
+        export_power = self.sg.measurements.get_value('ELE Export power')
 
-        price = 0.15  # todo - display can not yet handle it
+        # get price from tibber module
+        price = myTibber.get_price()
 
-        push_displays(generated_power, battery_soc, battery_pwr, car_soc, car_pwr, heat_soc, heat_pwr, export_power, price)
+        push_displays(generated_power, export_power, battery_soc, battery_pwr, car_soc, carpwr_W, heat_soc, heat_pwr, price, 0)
         #logger.info(generated_power, battery_soc, battery_pwr, car_soc, car_pwr, heat_soc, heat_pwr, export_power, price)
 
 
     def do_tesla_tibber_planning(self):  # every 5 min directly after reading car data
-        from task_tibber import myTibber
-
-        TIBBER_CAR_CHARGE_CURRENT = 16 # todo parameter - must be the same value as the decision, if solar overflow charging!!
+        TIBBER_CAR_CHARGE_CURRENT = 16 # todo par - must be the same value as the decision, if solar overflow charging!!
 
         now = datetime.now()
 
@@ -435,12 +462,12 @@ class ElectronFluxBalancer:
                 return
 
             if charge_current_request != TIBBER_CAR_CHARGE_CURRENT:
-                logger.info(f"Tibber charging cancelled due to requested {charge_current_request} A instead of {TIBBER_CAR_CHARGE_CURRENT} A.")
+                logger.debug(f"Tibber charging cancelled due to requested {charge_current_request} A instead of {TIBBER_CAR_CHARGE_CURRENT} A.")
                 # just leave it. self.myTesla.tesla_api.cmd_charge_cancel_schedule(self.myTesla.vin) # will immediately start
                 return
 
             if state != "Stopped":
-                logger.info(f"Tibber charging cancelled due to state being {state} instead of Stopped.")
+                logger.debug(f"Tibber charging cancelled due to state being {state} instead of Stopped.")
                 return
 
             mins = lib.tibber.tibber.datetime_to_minutes_after_midnight(myTibber.cheapest_charging_time(soc,soclim))
@@ -454,11 +481,16 @@ class ElectronFluxBalancer:
             logger.info(f"Tibber Car charge plan is start at {mins/60} h")
 
 
-
+zzz=0
 
 if __name__ == '__main__':
     efb = ElectronFluxBalancer()
-    while True:
+    while True: # every 2s
+
         efb.do_temperature_update() # fixme we do not have a watchdog here!
-        efb.do_heater_update()
+        zzz+=1
+        if zzz == 5:
+            efb.do_heater_update()  # every 10s
+            zzz = 0
+
         time.sleep(2)

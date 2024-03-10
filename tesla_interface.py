@@ -10,7 +10,7 @@ import json
 import math
 import time
 from lib.logger import Logger
-logger = Logger(logging.ERROR, "tesla.log")
+logger = Logger(logging.DEBUG, "tesla.log")
 
 from config import home
 
@@ -57,10 +57,8 @@ class TeslaCar:
 
         ### stuff to remember from last input for "is_ready"
         self.last_distance = 0 # ok
-        self.last_current_request = 0 # ok
-        self.last_current_actual = 0 # ok
-        self.last_charging_phases = 3
-        self.is_charging = False # ok
+        self.CAR_charger_real_phases = 3 # kept in because numbering is different!! this here is real phases!
+        self.is_charging = False # ok # raus
 
         self.car_db_data = MeasurementList()
         self.car_data_cache = None
@@ -73,7 +71,7 @@ class TeslaCar:
         self.car_db_data.add_item(name="CAR_charger_actual_current", source=('charge_state', 'charger_actual_current'), unit="A", filter_jump=1, send_min_diff=1)
         self.car_db_data.add_item(name="CAR_charge_current_request", source=('charge_state', 'charge_current_request'), unit="A", filter_jump=1, send_min_diff=1)
         self.car_db_data.add_item(name="CAR_charge_limit_soc", source=('charge_state', 'charge_limit_soc'), unit="%", filter_jump=1, send_min_diff=1)
-        self.car_db_data.add_item(name="CAR_charger_phases", source=('charge_state', 'charger_phases'), unit="n", filter_jump=1, send_min_diff=1)  # can be null while not charging
+        self.car_db_data.add_item(name="CAR_charger_phases", source=('charge_state', 'charger_phases'), unit="n", filter_jump=1, send_min_diff=1)  # can be '0' while not charging and is '2' at three-phase charge!
         self.car_db_data.add_item(name="CAR_charger_power", source=('charge_state', 'charger_power'), unit="kW", filter_jump=1, send_min_diff=1)
         self.car_db_data.add_item(name="CAR_charger_voltage", source=('charge_state', 'charger_voltage'), unit="V", filter_jump=5, send_min_diff=1)
         self.car_db_data.add_item(name="CAR_charging_state", source=('charge_state', 'charging_state'), unit="")  # can be 'Disconnected', 'Charging', 'Stopped', 'Complete', 'Starting'
@@ -93,13 +91,6 @@ class TeslaCar:
         self.car_db_data.add_item(name="CAR_charge_W", unit="W")
         self.car_db_data.add_item(name="CAR_seen_ago", unit="s")
 
-        '''self.get_car_life_data()
-        if self.car_data_cache is None:
-            logger.log("Tesla is asleep")
-            return
-        else:
-            logger.log(f"Tesla: {self.car_data_cache['vin']} at {str(self.car_data_cache['charge_state']['battery_level'])} % SoC with API {self.car_data_cache['api_version']}")
-        '''
 
 
     def get_car_life_data(self):
@@ -135,16 +126,17 @@ class TeslaCar:
             # this is 3 phase charging
             if _my_car_data['charge_state']['charger_phases'] == 2:
                 charge_actual_W = _my_car_data['charge_state']['charger_actual_current'] * _my_car_data['charge_state']['charger_voltage'] * 3
-                self.last_charging_phases = 3
+                self.CAR_charger_real_phases = 3
             elif _my_car_data['charge_state']['charger_phases'] == 1:
                 charge_actual_W = _my_car_data['charge_state']['charger_actual_current'] * _my_car_data['charge_state']['charger_voltage']
-                self.last_charging_phases = 1
+                self.CAR_charger_real_phases = 1
             else:
                 logger.error(f"Phases are hard, {_my_car_data['charge_state']['charger_phases']}")
                 charge_actual_W = 0
         else:
             self.is_charging = False
             charge_actual_W = 0
+            #logger.debug("not charging - no Watts")
 
         self.car_db_data.update_value("CAR_charge_W", charge_actual_W)
 
@@ -159,11 +151,7 @@ class TeslaCar:
         last_seen_s = time.time() - _my_car_data['charge_state']['timestamp'] / 1000
         self.car_db_data.update_value("CAR_seen_ago", last_seen_s)
 
-        # update member values
-        self.last_current_request = _my_car_data['charge_state']['charge_current_request']  # avoid control at 16A
-        self.last_current_actual = _my_car_data['charge_state']['charger_actual_current']
-
-        # update all values with a defined source
+        # update all values with a pre-defined source
         for i in self.car_db_data.get_name_list():
             s = self.car_db_data.get_source(i)
             if s is not None:
@@ -230,25 +218,31 @@ class TeslaCar:
         if self.car_data_cache['charge_state']['charging_state'] == 'Charging' and not _do_charge:
             logger.info(f"charging stopped at {self.car_data_cache['charge_state']['charger_actual_current']} A")
             try:
-                self.tesla_api.cmd_charge_stop(self.vin)
-                self.tesla_api.cmd_charge_set_amps(self.vin, 5) # reset to lowest "legal" value to be starting low at next start.
+                r = self.tesla_api.cmd_charge_stop(self.vin)
+                if r:
+                    logger.debug("car charging stopped")
+                    self.car_data_cache['charge_state']['charging_state'] = 'Stopped'  # remember / fake the state!
+                    self.refresh(self.car_data_cache)  # publish again
+                    self.tesla_api.cmd_charge_set_amps(self.vin, 5) # reset to lowest "legal" value to be starting low at next start.
             except Exception as e:
                 logger.error(f"Exception during stopping charge {type(e)}: {e}")
-            self.car_data_cache['charge_state']['charging_state'] = 'Stopped' # remember the state!
-            self.refresh(self.car_data_cache)  # publish again
+
             return True  # finished here, as all else is related to setting the current
 
-        req_power_w = _req_amps * self.last_charging_phases * 230
+        req_power_w = _req_amps * self.CAR_charger_real_phases * 230
         if req_power_w > 11000:
             logger.error(f"WATT is wrong with you, {req_power_w} W")
             return False
 
         if self.car_data_cache['charge_state']['charging_state'] == 'Stopped' and _do_charge:
             try:
-                self.tesla_api.cmd_charge_start(self.vin)
+                r = self.tesla_api.cmd_charge_start(self.vin)
+                if r:
+                    logger.debug("car charging started")
+                    self.car_data_cache['charge_state']['charging_state'] = 'Starting'  # remember / fake the state!
+                    self.refresh(self.car_data_cache)  # publish again
             except Exception as e:
                 logger.error(f'Exception during starting charge {type(e)}: {e}')
-            logger.info("car charging started")
 
 
         if not (self.car_data_cache['charge_state']['charging_state'] == 'Charging' or self.car_data_cache['charge_state']['charging_state'] == 'Starting'):
@@ -261,20 +255,20 @@ class TeslaCar:
             return False
 
         if self.car_data_cache['charge_state']['charge_current_request'] != ampere_rounded:  # only send, if different
-            r = False
             try:
-                _res = self.tesla_api.cmd_charge_set_amps(self.vin, int(ampere_rounded))
-                if _res is True:
+                r = self.tesla_api.cmd_charge_set_amps(self.vin, int(ampere_rounded))
+                if r is True:
                     # if successful, we update the self.car_data_cache['charge_state']['charge_current_request']
                     # so we do not have to read it back.
                     self.car_data_cache['charge_state']['charge_current_request'] = int(ampere_rounded)
+                    return True
 
             except Exception as e:
                 logger.log(f"Exception during changing charge request {type(e)}: {e}")
 
-            return r
+            return False
         else:
-            logger.info(f"Charge current ok, {ampere_rounded}")
+            logger.debug(f"Charge current ok, {ampere_rounded}")
             return True
 
 
