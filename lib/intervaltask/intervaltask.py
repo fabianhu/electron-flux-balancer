@@ -58,7 +58,7 @@ class TaskController:
 
         while True:
             next_run = time.time() + interval
-            watchdog = threading.Timer(watchdog_timeout, self._restart_task, args=(name,))
+            watchdog = threading.Timer(watchdog_timeout, self._task_timeout_handler, args=(name,))
             watchdog.start()
 
             start_time = time.time()
@@ -87,7 +87,7 @@ class TaskController:
             if time_to_next_run > 0:
                 time.sleep(time_to_next_run)
 
-    def _restart_task(self, name):
+    def _task_timeout_handler(self, name):
         with self.lock:
             logger.error(f"Watchdog activated for task {name}.")
             task_data = self.tasks[name]

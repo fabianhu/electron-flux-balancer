@@ -36,7 +36,7 @@ def send_display_analog(url,prc):
         #contents = urllib.request.urlopen("http://example.com/foo/bar").read()
         url = url + "?prc=" + str(prc)
         response = requests.get(url, data=None, timeout=3)
-        print(response.text)
+        # print(response.text)
     except requests.exceptions.ConnectionError as e:
         pass  # no alarm
         # logger.log(f"Display {url} Exception: {e}")

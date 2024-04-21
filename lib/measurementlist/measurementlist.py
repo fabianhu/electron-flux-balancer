@@ -152,7 +152,10 @@ class MeasurementList:
 
 
     def write_measurements(self):
-        self.client.write_points(self.get_wellformed_array())
+        try:
+            self.client.write_points(self.get_wellformed_array())
+        except ConnectionError:
+            logger.error("Connection Exception during write to database")
 
 
 

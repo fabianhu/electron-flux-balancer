@@ -3,6 +3,8 @@ import logging
 import inspect
 
 class Logger:
+    count = 0
+
     def __init__(self, log_level=logging.ERROR, log_path='log.log'):
         """
         Initializes a Logger object for module-specific logging.
@@ -35,8 +37,16 @@ class Logger:
 
         self.logger.addHandler(self.log_handler)
 
+        if Logger.count == 0:
+            self.logint("############### LOGGER START ############################################")
+        Logger.count += 1
+
         self.logint(f"Logger created from {module_name} logging to {log_path}")
+
         self.logger.info("############### START ############################################")
+
+
+
 
     def debug(self, message):
         self.logger.debug(message)

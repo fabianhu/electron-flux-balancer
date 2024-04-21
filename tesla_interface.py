@@ -10,14 +10,14 @@ import json
 import math
 import time
 from lib.logger import Logger
-logger = Logger(logging.DEBUG, "tesla.log")
+logger = Logger(logging.ERROR, "tesla.log")
 
 from config import home
 
 from lib.tesla_api import tesla_api_2024
 
 logToFile = False
-APIVERSION = 73
+APIVERSION = 75
 
 
 # extract the value from a multi index

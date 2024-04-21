@@ -32,6 +32,8 @@ class OpenDTU:
 
     def update(self):
         url = f"http://{self.ip_address}/api/livedata/status"
+
+        # some brain decided, that every converter must be polled individually. /api/livedata/status?inv=inverter-serialnumber
         try:
             # Send a GET request to the URL
             response = requests.get(url, timeout= 5)
@@ -56,11 +58,24 @@ class OpenDTU:
             logger.log(f"DTU JSON decoding error: {e}")
             return
 
+        # get the data for each inverter and hack them into the tree.
+        inverters = data["inverters"]
+        inverters_all = inverters
+        for inverter in inverters:
+            invser = inverter.get("serial")
+            response = requests.get(url + "?inv=" + invser, timeout=5)
+            data = response.json()
+            # merge data into original tree
+
+            for i, da in enumerate(inverters_all):
+                if da["serial"] == inverter["serial"]:
+                    inverters_all[i] = data["inverters"][0].copy()
+
+        # and now check for the values
         for item in self.dat.get_name_list():
-            inverters = data["inverters"]
             ser = self.dat.get_source(item)[0]
             keys = self.dat.get_source(item)[1:]
-            for inverter in inverters:
+            for inverter in inverters_all:
                 if inverter["reachable"] == True and ser == inverter["serial"]:
                     nd = access_nested_dict(inverter,keys)
                     self.dat.update_value(item,nd)

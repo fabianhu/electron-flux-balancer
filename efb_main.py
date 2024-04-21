@@ -80,6 +80,7 @@ def map_sym_to_percentage(value, srange):
 
 class ElectronFluxBalancer:
     def __init__(self):
+        self.home_batt_force_state = 'Idle'
         self.stop_heater = False
         self.stop_tesla = False
         self.island_mode = False
@@ -134,8 +135,8 @@ class ElectronFluxBalancer:
         taskctl.add_task("tesla", self.do_car_update, 5*60,30)
         taskctl.add_task("tesla_charge", self.do_car_charge, 30, 20)
         taskctl.add_task("sungrow", self.do_sungrow_update, 2, 8)
-        taskctl.add_task("tasmota", self.do_tasmota_stuff,10,10)
-        taskctl.add_task("displays", self.do_display_update, 10, 10)
+        taskctl.add_task("tasmota", self.do_tasmota_stuff,5,10)
+        taskctl.add_task("displays", self.do_display_update, 10, 30)
 
         import task_tibber
         taskctl.add_task("tibber", task_tibber.do_tibber_to_influx, 60, 30)
@@ -231,10 +232,10 @@ class ElectronFluxBalancer:
                 logger.info("Charging end - too much power draw or batt empty")
             else:
                 self.car_charge_amp_command_integrator = 0
-                logger.info("too much power draw or batt empty")
+                #logger.info("too much power draw or batt empty")
         else:
             self.car_charge_amp_command_integrator = 0  # Tesla not ready
-            logger.info("Car not ready")
+            # logger.info("Car not ready") # all the time
 
         # send to DB what we actually commanded tight now.
         self.heating_measurements.update_value("CAR Charge command", self.car_charge_amp_command_integrator * 230 * phases)
@@ -246,23 +247,80 @@ class ElectronFluxBalancer:
 
 
     def do_sungrow_update(self):
+        # fixme parameters and add time and maybe price difference for next 6h or so
+        par_force_charge_power = 5000
+        par_start_charge_below_soc = 15 # needs to be daytime dependent
+        par_charge_until_soc = 30  # needs to be daytime dependent
+        par_start_charge_grid_price = 0.175 # needs to be daytime dependent  # fixme calculate from lowest point and at the latest before prize rises again... maybe simulate?
+
         self.sg.update()  # get values from Wechselrichter
 
         car_charge_power = self.myTesla.car_db_data.get_value('CAR_charge_W')
+        if car_charge_power is None:
+            car_charge_power = 0
 
-        # battery_soc = self.sg.measurements.get_value('ELE Battery level')
-        # fixme batrecommend = task_tibber.check_battery(battery_soc)
+        actual_grid_price = myTibber.get_price()
+        actual_home_power = self.sg.measurements.get_value('ELE Battery power')
+        actual_home_soc = self.sg.measurements.get_value('ELE Battery level')
+
+        # secure next steps against exceptions
+        if actual_home_soc is None or actual_grid_price is None or actual_home_power is None:
+            logger.error(f"None values !! homesoc {actual_home_soc} carpwr {car_charge_power} prc {actual_grid_price} homepwr {actual_home_power} i")
+            self.sg.set_forced_charge(None)
+            return
 
         is_here_and_connected = self.myTesla.is_here_and_connected()
+        we_want_to_charge_the_house = actual_home_soc < par_start_charge_below_soc and actual_grid_price <= par_start_charge_grid_price
+        car_is_pulling_lots = is_here_and_connected and car_charge_power > 10000
 
         # logger.debug(f"Car charge power {car_charge_power} W and is here: {is_here_and_connected}")
 
         # stop DISCHARGING the battery on high load from car and control battery at same point.
-        if  is_here_and_connected and car_charge_power > 10000:  # fixme check this decision!!
-            self.sg.set_forced_charge(0)
-            # logger.debug(f"Car charge power {car_charge_power} W -> House batt off")
+
+        if self.home_batt_force_state == 'Idle':
+            if we_want_to_charge_the_house:
+                # power is cheap and we want to charge
+                logger.debug("charging home batt from Idle")
+                if self.sg.set_forced_charge(par_force_charge_power):
+                    self.home_batt_force_state = 'Charge'
+            elif car_is_pulling_lots:
+                # we have to stop batt because we are pulling lots of power
+                logger.debug(f"Car charge power {car_charge_power} W -> House batt Stop")
+                if self.sg.set_forced_charge(0):
+                    self.home_batt_force_state = 'Stop'
+            else:
+                # everything fine, normal operation, nothing special
+                pass
+
+        elif self.home_batt_force_state == 'Stop':
+            if we_want_to_charge_the_house:
+                # power is cheap and we want to charge
+                logger.debug("charging home batt from Stop")
+                if self.sg.set_forced_charge(par_force_charge_power):
+                    self.home_batt_force_state = 'Charge'
+            elif not car_is_pulling_lots:
+                # car has stopped charging, we can release the batt.
+                logger.debug(f"Car charge power {car_charge_power} W -> House batt on again")
+                if self.sg.set_forced_charge(None):  # or forced charge
+                    self.home_batt_force_state = 'Idle'
+            else:
+                # everything fine, normal operation, nothing special
+                pass
+
+        elif self.home_batt_force_state == 'Charge':
+            if actual_home_soc > par_charge_until_soc or actual_grid_price > par_start_charge_grid_price:
+                logger.debug("home batt charge end")
+                if self.sg.set_forced_charge(None):
+                    self.home_batt_force_state = 'Idle'  # idle will catch the car in next round.
+            else:
+                # keep charging, as electricity is cheap!
+                # no difference, if car is charging or not.
+                # We should have some headroom for power... (35A*3*230V = 24kW - 11kw - 5kw = 8kW)
+                pass
+
         else:
             self.sg.set_forced_charge(None)
+            logger.error(f"FATAL wrong state of self.home_batt_force_state = {self.home_batt_force_state}")
 
 
     def do_temperature_update(self): # every 2s
@@ -404,7 +462,7 @@ class ElectronFluxBalancer:
 
     def do_tasmota_stuff(self):
 
-        self.dtu.update()  # just hang in the same interval - 10s
+        self.dtu.update()  # just hang in the same interval
 
         generated_power_S = self.sg.measurements.get_value_filtered('ELE String S power')
         generated_power_N = self.sg.measurements.get_value_filtered('ELE String N power')

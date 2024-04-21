@@ -307,6 +307,9 @@ class Tibber:
         current_datetime = datetime.now()
         # Find the price for the current hour
         current_price = None
+        if self.prices is None:  # avoid exception
+            return None
+
         for item in self.prices:
             item_dt = tibber_time_to_datetime(item['startsAt'])
             if item_dt.hour == current_datetime.hour and item_dt.date() == current_datetime.date():

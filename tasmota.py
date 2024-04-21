@@ -1,10 +1,11 @@
+import logging
 from datetime import datetime
 
 import pytz
 
 from lib.measurementlist import MeasurementList
 from lib.logger import Logger
-logger = Logger()
+logger = Logger(log_level=logging.DEBUG, log_path="tasmota.log")
 import requests
 import time
 import imagelogger
@@ -138,15 +139,18 @@ class Tasmotas:
             # Parse the JSON response
             r = response.json()
             lasttime = pytz.utc.localize(datetime.strptime(r['StatusSNS']['Time'], '%Y-%m-%dT%H:%M:%S')).timestamp()
-            if time.time()-lasttime > 10:
-                logger.log(f"sml Request data too old {r['StatusSNS']['Time']}")
-                for el in list(self.smldat.get_name_list()):
-                    self.smldat.update_value(el, None)
-            else:
-                for el in list(self.smldat.get_name_list()):
-                    self.smldat.update_value(el, r['StatusSNS'][''][self.smldat.get_source(el)])
+            try:
+                if time.time()-lasttime > 10:
+                    logger.error(f"sml Request data too old {r['StatusSNS']['Time']}")
+                    for el in list(self.smldat.get_name_list()):
+                        self.smldat.update_value(el, None)
+                else:
+                    for el in list(self.smldat.get_name_list()):
+                        self.smldat.update_value(el, r['StatusSNS'][''][self.smldat.get_source(el)])
+            except KeyError:
+                logger.error("sml Key error")
         else:
-            logger.log(f"sml Request failed with status code: {response.status_code}")
+            logger.error(f"sml Request failed with status code: {response.status_code}")
             for el in list(self.smldat.get_name_list()):
                 self.smldat.update_value(el, None)
 

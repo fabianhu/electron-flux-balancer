@@ -190,7 +190,7 @@ class SungrowSH:
             logger.error(f'Modbus TCP error {type(e)}: {e}')
 
     @lib.intervaltask.intervaltask.thread_alert
-    def set_forced_charge(self, _power):
+    def set_forced_charge(self, _power) -> bool:
         """
         Command the battery to charge or discharge with set power.
         Only writes, if different from actual setting.
@@ -198,20 +198,20 @@ class SungrowSH:
         :return:
         """
         if self.forced_charge == _power:  # avoid execution, when wanted status is equal to the desired state.
-            return
+            return True # ok, expected
 
         try:
             self.client.connect()
         except Exception as e:
             logger.error(f'Modbus TCP connect {type(e)}: {e}')
-            return
+            return False
         else:
             # write power command - but only if it has changed!
             try:
                 r = self.client.read_holding_registers(13049, 3, 1)
                 if not hasattr(r, 'registers'):
                     logger.error(f"Modbus read error on set charge to {_power} W")
-                    return
+                    return False
 
                 read_registers = r.registers
                 """
@@ -255,13 +255,28 @@ class SungrowSH:
 
                 if is_write_necessary:
                     logger.info(log_info_txt)
-                    self.client.write_registers(13049, set_registers, 1)
-                    self.forced_charge = _power
+                    try:
+                        response = self.client.write_registers(13049, set_registers, 1)  # fixme check successful write
+                    except Exception as e:
+                        logger.error(f'Modbus write error {type(e)}: {e}')
+                        return False
 
+                    if response.address == 13049 and response.count == len(set_registers):
+                        self.forced_charge = _power
+                        return True
+                    else:
+                        logger.debug(f"response on write registers not as expected: {response}")
+                        return False
 
-            except Exception as e:
+                else:
+                    pass # no write was necessary, read stuff is equal to what I wanted to send.
+                    self.forced_charge = _power # just update, because it seems to be not correct.
+                    return True
+
+            except Exception as e:  # from try-connect
                 logger.error(f'Modbus write error on set charge {type(e)}: {e}')
-                return
+                return False
+
 
     @lib.intervaltask.intervaltask.thread_alert
     def set_soc_reserve(self,prc):
@@ -325,7 +340,8 @@ if __name__ == '__main__':
     #sg.update(_test=True)
     #sg.update(_test=True) # call twice to process all data!
 
-    sg.set_forced_charge(None)
+    r = sg.set_forced_charge(None)
+    print(r)
     #sg.set_soc_reserve(10)
 
     '''r= sg.client.read_holding_registers(13049,3,1)
