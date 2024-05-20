@@ -12,31 +12,33 @@ from influxdb import InfluxDBClient
 
 class MeasurementList:
     def __init__(self, host='127.0.0.1', port=8086, database='home'):
-        self.__data = {}
+        self.__data = {} # the data structure is defined by the add_item function.
         self.client = InfluxDBClient(host=host, port=port, database=database)
 
     def add_item(self, name,
-                 unit = "",
-                 send_min_diff = 0.25,
-                 send_max_time = 5*60,
-                 filter_time = 60,
-                 filter_jump = 0,
-                 source = None,
-                 filter_std_time = 0,):
+                 unit = "", # unit, just for decoration.
+                 send_min_diff = 0.25, # parameter - we only send data to the DB if it is minimum this much different to the last one.
+                 send_max_time = 5*60, # even if the value did not change much, we re-send it after this time
+                 filter_time = 60, # the time constant of the filter (PT1) we apply for the filtered value
+                 filter_jump = 0, # if the new value is this much different from the old one, we "jump" the filter and take the new value directly.
+                 source = None, # where to get the data from - evaluated in the class using this class - This class does not have any idea about this object and also does not use it.
+                 filter_std_time = 0, # the time constant of the filter (PT1) we apply for the unfiltered (sic!) value - in fact so becomes the unfiltered value also filtered.
+                 ):
         lastTime = time.time()
-        self.__data[name] = {'value': None,
-                           'value_filtered': None,
-                           'unit': unit,
-                           'value_last_update_time':lastTime,
-                           'send_last_value':None,
-                           'send_last_time':lastTime,
-                           'send_min_diff':send_min_diff,
-                           'send_max_time':send_max_time,
-                           'filter_time':filter_time,
-                           'filter_jump':filter_jump,
-                           'source':source,
-                           'filter_std_time':filter_std_time,
-                             }
+        self.__data[name] = {
+                'value': None,  # the "unfiltered" value can be Float or None.
+                'value_filtered': None, # the filtered value
+                'unit': unit,
+                'value_last_update_time':lastTime,  # remember the last time, we updated the value
+                'send_last_value':None, # the last value, we sent to the DB
+                'send_last_time':lastTime, # remember the last time, we sent the data to the DB
+                'send_min_diff':send_min_diff,
+                'send_max_time':send_max_time,
+                'filter_time':filter_time,
+                'filter_jump':filter_jump,
+                'source':source,
+                'filter_std_time':filter_std_time,
+             }
     def get_name_list(self):
         return self.__data.keys()
 

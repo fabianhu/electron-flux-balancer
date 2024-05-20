@@ -30,6 +30,7 @@ influxd restore -portable /path/to/backup-destination
 """
 import logging
 
+import ai_edge
 import config
 import modbus
 import tesla_interface
@@ -129,14 +130,17 @@ class ElectronFluxBalancer:
 
         self.tas = tasmota.Tasmotas()
 
+        self.aie = ai_edge.AiEdge()
+
         self.dtu = openDTU.OpenDTU(openDTU_ip)
 
         taskctl = lib.intervaltask.TaskController()
         taskctl.add_task("tesla", self.do_car_update, 5*60,30)
-        taskctl.add_task("tesla_charge", self.do_car_charge, 30, 20)
+        taskctl.add_task("tesla_charge", self.do_car_charge, 30, 30) # fixme faster interval for BLE?
         taskctl.add_task("sungrow", self.do_sungrow_update, 2, 8)
-        taskctl.add_task("tasmota", self.do_tasmota_stuff,5,10)
-        taskctl.add_task("displays", self.do_display_update, 10, 30)
+        taskctl.add_task("tasmota", self.do_tasmota_stuff,5,30)
+        taskctl.add_task("displays", self.do_display_update, 5, 30)
+        taskctl.add_task("AI_edge", self.do_ai_update,2*60, 30)
 
         import task_tibber
         taskctl.add_task("tibber", task_tibber.do_tibber_to_influx, 60, 30)
@@ -192,6 +196,8 @@ class ElectronFluxBalancer:
         CAR_charge_current_request = self.myTesla.car_db_data.get_value('CAR_charge_current_request')
 
         # ready for solar overflow charging
+        charge_cmd_result = False
+
         if self.myTesla.is_here_and_connected() and not self.stop_tesla and not CAR_charge_current_request == 16 and not (
                 house_export_power is None or
                 house_battery_power is None or
@@ -218,27 +224,33 @@ class ElectronFluxBalancer:
 
                 if (house_export_power + house_battery_power + phantasy_power) > 750 and self.car_charge_amp_command_integrator < 15:
                     self.car_charge_amp_command_integrator += 1
-                    self.myTesla.set_charge(True, self.car_charge_amp_command_integrator)
+                    charge_cmd_result = self.myTesla.set_charge(True, self.car_charge_amp_command_integrator)
                     # logger.info(f"Tesla inc {self.car_charge_amp_command_integrator}")
 
                 if (house_export_power + house_battery_power + phantasy_power) < (-500 if self.island_mode else 0) and self.car_charge_amp_command_integrator > 0:
                     self.car_charge_amp_command_integrator -= 1
-                    self.myTesla.set_charge(True, self.car_charge_amp_command_integrator)
+                    charge_cmd_result = self.myTesla.set_charge(True, self.car_charge_amp_command_integrator)
                     # logger.info(f"Tesla dec {self.car_charge_amp_command_integrator}")
 
             elif self.myTesla.is_charging: # do not charge anymore (conditions not met)
                 self.myTesla.set_charge(False, 0)
                 self.car_charge_amp_command_integrator = 0
+                charge_cmd_result = True
                 logger.info("Charging end - too much power draw or batt empty")
             else:
                 self.car_charge_amp_command_integrator = 0
+                charge_cmd_result = True
                 #logger.info("too much power draw or batt empty")
         else:
             self.car_charge_amp_command_integrator = 0  # Tesla not ready
+            charge_cmd_result = True
             # logger.info("Car not ready") # all the time
 
-        # send to DB what we actually commanded tight now.
-        self.heating_measurements.update_value("CAR Charge command", self.car_charge_amp_command_integrator * 230 * phases)
+        # send to DB what we actually commanded right now. # fixme or read from car cache??
+        if charge_cmd_result:
+            self.heating_measurements.update_value("CAR Charge command", self.car_charge_amp_command_integrator * 230 * phases)
+        else:
+            self.heating_measurements.update_value("CAR Charge command", None)
 
         if self.car_charge_amp_command_integrator > 0 or self.myTesla.is_charging:
             self.allowHeater = False
@@ -473,6 +485,8 @@ class ElectronFluxBalancer:
 
         self.tas.update(generated_power)  # updates one at a time.
 
+    def do_ai_update(self):
+        self.aie.update()
 
     def do_display_update(self):
         generated_power_S = self.sg.measurements.get_value_filtered('ELE String S power')
@@ -520,7 +534,7 @@ class ElectronFluxBalancer:
                 return
 
             if charge_current_request != TIBBER_CAR_CHARGE_CURRENT:
-                logger.debug(f"Tibber charging cancelled due to requested {charge_current_request} A instead of {TIBBER_CAR_CHARGE_CURRENT} A.")
+                # all ok, we know that this works. logger.debug(f"Tibber charging cancelled due to requested {charge_current_request} A instead of {TIBBER_CAR_CHARGE_CURRENT} A.")
                 # just leave it. self.myTesla.tesla_api.cmd_charge_cancel_schedule(self.myTesla.vin) # will immediately start
                 return
 

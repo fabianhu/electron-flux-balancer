@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 
 import pytz
 
@@ -10,9 +9,7 @@ import requests
 import time
 import imagelogger
 from config import tasmota_ips, tasmota_meter_ip
-
-# fixme Exception: Task tasmota is hanging
-
+from datetime import datetime, timedelta, timezone
 
 lastImageTime = time.time()
 class Tasmotas:
@@ -157,12 +154,14 @@ class Tasmotas:
         self.smldat.write_measurements()
 
 
+
 # test stuff
 if __name__ == '__main__':
 
     ts = Tasmotas()
 
-    ts.update_sml()
+    #ts.update_sml()
     #time.sleep(3)
     #ts.update(0)
+
 

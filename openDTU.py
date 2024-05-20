@@ -63,13 +63,17 @@ class OpenDTU:
         inverters_all = inverters
         for inverter in inverters:
             invser = inverter.get("serial")
-            response = requests.get(url + "?inv=" + invser, timeout=5)
-            data = response.json()
-            # merge data into original tree
+            try:
+                response = requests.get(url + "?inv=" + invser, timeout=5)
+                data = response.json()
+                # merge data into original tree
 
-            for i, da in enumerate(inverters_all):
-                if da["serial"] == inverter["serial"]:
-                    inverters_all[i] = data["inverters"][0].copy()
+                for i, da in enumerate(inverters_all):
+                    if da["serial"] == inverter["serial"]:
+                        inverters_all[i] = data["inverters"][0].copy()
+            except requests.exceptions.RequestException as e:
+                logger.log(f"DTU Request detail error: {e}")
+                return
 
         # and now check for the values
         for item in self.dat.get_name_list():

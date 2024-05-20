@@ -1,7 +1,9 @@
 import serial
 import struct
+
+import logging
 from lib.logger import Logger
-logger = Logger()
+logger = Logger(log_level=logging.DEBUG, log_path="modbus.log")
 
 # Define the hex string to send to the Modbus RTU device
 
@@ -159,10 +161,10 @@ class Bestep2Relays(Device):
         else:
             relay_addresses = [0x0003, 0x0008, 0x000d, 0x0012, 0x0017, 0x001c, 0x0021, 0x0026]
             relay_address = relay_addresses[num - 1]
-            # hex_string = '{:02x}'.format(addr) + "10 00 03 00 02 04 00 04 00 32"  # rel 1 for 5s (0x32 = 50 *0.1s)
+            # hex_string = '{:02x}'.format(addr) + "10 00 03 00 02 04 00 04 00 32"  # rel 1 for 5s (0x32 = 50 *0.1s)  # fixme timeout does NOT work reliably! -> shutdown Pi + keeps running!
             # hex_string = '{:02x}'.format(addr) + "10 00 03 00 02 04 00 02 00 1E" UUUUh
             if timeout > 6553:
-                logger.log(f"timeout for Relais too long!, {timeout}")
+                logger.error(f"timeout for Relais too long!, {timeout}")
                 return
             hex_string = '{:02x}'.format(self.address) + "10 00 " + '{:02x}'.format(
                 relay_address) + " 00 02 04 00 04" + '{:04x}'.format(int(timeout * 10))

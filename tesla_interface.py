@@ -10,14 +10,14 @@ import json
 import math
 import time
 from lib.logger import Logger
-logger = Logger(logging.ERROR, "tesla.log")
+logger = Logger(logging.INFO, "tesla.log")
 
 from config import home
 
 from lib.tesla_api import tesla_api_2024
 
 logToFile = False
-APIVERSION = 75
+APIVERSION = 76
 
 
 # extract the value from a multi index
@@ -175,20 +175,20 @@ class TeslaCar:
     def is_here_and_connected(self):  # check, if car is ready according last data - without asking!
         # Car is not here
         if self.last_distance > 0.3:
-            logger.debug(f"Tesla is {self.last_distance}km away")
+            #logger.debug(f"Tesla is {self.last_distance}km away")
             return False
 
         if self.car_data_cache is None or not 'charge_state' in self.car_data_cache:
-            logger.debug("Tesla no info")
+            #logger.debug("Tesla no info")
             return False
 
         # check car state
         if not self.car_data_cache['charge_state']['conn_charge_cable'] == 'IEC':
-            logger.debug("Tesla is not connected")
+            #logger.debug("Tesla is not connected")
             return False
 
         if not self.car_data_cache['charge_state']['charging_state'] in ['Charging', 'Stopped']:  # not 'Complete'
-            logger.debug("Tesla is connected, but not in right mood")
+            #logger.debug("Tesla is connected, but not in right mood")
             return False
         return True
 
@@ -251,7 +251,7 @@ class TeslaCar:
             return False
 
         if ampere_rounded > 15:
-            logger.log(f"too many amps requested, {ampere_rounded}")
+            logger.error(f"too many amps requested, {ampere_rounded}")
             return False
 
         if self.car_data_cache['charge_state']['charge_current_request'] != ampere_rounded:  # only send, if different
@@ -262,9 +262,11 @@ class TeslaCar:
                     # so we do not have to read it back.
                     self.car_data_cache['charge_state']['charge_current_request'] = int(ampere_rounded)
                     return True
+                else:
+                    logger.error(f"Setting current failed: {r}")
 
             except Exception as e:
-                logger.log(f"Exception during changing charge request {type(e)}: {e}")
+                logger.error(f"Exception during changing charge request {type(e)}: {e}")
 
             return False
         else:

@@ -92,9 +92,10 @@ class TaskController:
             logger.error(f"Watchdog activated for task {name}.")
             task_data = self.tasks[name]
             if self.is_task_running(name): # check if task is still running
-                logger.error(f"Task {name} is still running and the timeout of {self.tasks[name]['watchdog_timeout']}s is over - task data: {task_data}")
+                logger.error(f"Task {name} is still running and the timeout of {self.tasks[name]['watchdog_timeout']}s is over \n - task data: {task_data}")
                 # fixme we did not kill it!
-                raise Exception(f"Task {name} is hanging with data: {task_data}")
+                # fixme reboot or other action... meanwhile we just wait.
+                # raise Exception(f"Task {name} is hanging with data: {task_data}")
             else:
                 logger.error(f"Task {name} died on the way - restarting")
                 t = threading.Thread(target=self._run_task, args=(name,))
