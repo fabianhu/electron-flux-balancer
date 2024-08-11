@@ -1,4 +1,5 @@
 # Electron Flux Balancer
+Home automation system
 
 Works with 
 * Sungrow SH10RT hybrid inverter
